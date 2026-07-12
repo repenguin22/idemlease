@@ -43,3 +43,13 @@ jobs:
             exit 1
           fi
           echo 'OK: core package does not depend on net/http'
+      # ランタイム依存ゼロ: テストヘルパー（go-cmp 等）がビルド依存に漏れていないこと
+      - name: root module build deps must be stdlib-only
+        run: |
+          deps="$(go list -deps ./... | grep -v '^github.com/repenguin22/idemlease' | awk -F/ '$1 ~ /\./')"
+          if [ -n "$deps" ]; then
+            echo 'NG: third-party build deps found:'
+            echo "$deps"
+            exit 1
+          fi
+          echo 'OK: build deps are stdlib-only'

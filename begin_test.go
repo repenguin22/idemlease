@@ -6,11 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/repenguin22/idemlease"
 )
 
@@ -188,8 +188,8 @@ func TestBeginStoreFailure(t *testing.T) {
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the injected store error", err)
 	}
-	if !reflect.DeepEqual(out, idemlease.Outcome{}) {
-		t.Errorf("Outcome = %+v, want zero value on error", out)
+	if diff := cmp.Diff(idemlease.Outcome{}, out); diff != "" {
+		t.Errorf("Outcome must be the zero value on error (-want +got):\n%s", diff)
 	}
 }
 

@@ -36,6 +36,7 @@
 - コアの語彙は Begin/Finish + Reserve/Complete/Release を維持し、Set/Verify に縮めない（§11 決定 12）
 - reservation トークンの生成主体は **Begin**（crypto/rand、128bit 以上）。Store は保存・照合のみ（§2.2）
 - Payload を過度に抽象化しない（`StoredResponse` とそのシリアライズは httpidem の責務。§2.3）
+- **ランタイム依存ゼロを維持**。テストヘルパー（go-cmp / testify 等）は同一モジュール内の `_test.go` に限り使用可。公開適合性パッケージ（`idemleasetest` / `httpidemtest`）には持ち込まない（契約 §2.1 の「依存 = stdlib」を維持。Store 実装者に依存を強制しないため）。ビルド依存に漏れていないことは CI で機械検証
 
 ## マイルストーン
 
@@ -171,4 +172,5 @@
 | LICENSE | 決定（2026-07-12） | MIT |
 | モジュールパス | 決定（2026-07-12） | `github.com/repenguin22/idemlease` |
 | Go 最低バージョン | 決定（2026-07-12） | **1.22**（go directive）。契約 §10 の下限（`log/slog` = 1.21）を満たす。CI は 1.22.x と stable の 2 系でテスト |
+| テストヘルパー依存 | 決定（2026-07-12） | `_test.go` では go-cmp / testify 等を使用可（go-cmp v0.7.0 導入済み）。本体と公開適合性パッケージは stdlib のみを維持し、CI でビルド依存の stdlib-only を機械検証 |
 | 公開 README の言語 | 未決 | 提案: 英語（日本語版を docs/ に併置） |
