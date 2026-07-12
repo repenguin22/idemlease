@@ -88,6 +88,8 @@
 
 ### M3 — HTTP 統合（`httpidem`）
 
+**状態: ✅ 完了（2026-07-12）**
+
 **成果物**
 - キー文法 §4.1: 生文字列が正規形（制御文字以外の任意バイト列 1〜255 バイト）、RFC 8941 String 互換受理（`"abc"` ≡ `abc`）、複数ヘッダ 400、`KeyValidator`
 - 指紋 §4.2: `SHA-256(METHOD + "\n" + EscapedPath + "?" + RawQuery + "\n" + body)`。**関数をエクスポート**。body 全読み（`MaxRequestBody` 既定 1 MiB、超過は 413 or バイパス素通し）と `r.Body` 復元（MultiReader 相当）
