@@ -73,6 +73,8 @@
 
 ### M2 — Store 適合性キット + memstore
 
+**状態: ✅ 完了（2026-07-12）**
+
 **成果物**
 - `idemleasetest.RunStoreTests`（§3.2 受け入れ条件）:
   - 競合 Reserve（並行 100 本で成功 1）

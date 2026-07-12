@@ -13,8 +13,9 @@ var _ idemlease.Store = (*fakeStore)(nil)
 
 // fakeStore is an in-memory reference implementation of the Store
 // semantics (REQUIREMENTS §3.2) with fault injection and expiry control
-// for tests. It is the model for memstore (M2), where it will be
-// promoted into the idemleasetest conformance suite.
+// for tests. A hook-free variant ships as memstore, and
+// TestFakeStoreConformance keeps this double aligned with the public
+// conformance suite in idemleasetest.
 type fakeStore struct {
 	mu   sync.Mutex
 	recs map[string]idemlease.Record
