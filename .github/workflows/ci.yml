@@ -55,19 +55,27 @@ jobs:
           echo 'OK: build deps are stdlib-only'
 
   redistore:
-    name: redistore (go ${{ matrix.go }})
+    name: redistore (go ${{ matrix.go }}, ${{ matrix.server.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         go: ["1.22.x", "stable"]
+        # Redis 本家と Valkey（互換実装）の両方で適合性を常時検証する
+        server:
+          - name: redis
+            image: redis:7-alpine
+            health_cmd: redis-cli ping
+          - name: valkey
+            image: valkey/valkey:8-alpine
+            health_cmd: valkey-cli ping
     services:
       redis:
-        image: redis:7-alpine
+        image: ${{ matrix.server.image }}
         ports:
           - 6379:6379
         options: >-
-          --health-cmd "redis-cli ping"
+          --health-cmd "${{ matrix.server.health_cmd }}"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20

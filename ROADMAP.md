@@ -122,7 +122,7 @@
 **成果物**
 - go-redis 実装: Reserve = SET NX（PX）による単一原子操作（期限切れの原子的上書き含む）、Complete/Release = Lua スクリプトによる token CAS
 - トークンは保存・照合のみ（生成・改変しない — 適合性の保存忠実性テストで担保）
-- CI: Redis を service container で起動し `idemleasetest` 全件 + `-race`
+- CI: Redis / Valkey をサービスコンテナで起動し適合性全件 + `-race`（両実装のマトリクス検証。2026-07-13 に Valkey 追加）
 - マルチモジュール CI（ルート / redistore の 2 ジョブ）とタグ運用（`redistore/vX.Y.Z`）の整備
 
 **Exit criteria**: §12-7 完了（memstore / redistore とも適合性全件通過）。

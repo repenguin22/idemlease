@@ -14,7 +14,11 @@
 // Expiry TTLs are computed as durations on the application side and
 // applied relative to the Redis server clock, so moderate clock skew
 // between application and Redis does not corrupt lease semantics.
-// Requires Redis 6.0 or later.
+//
+// Requires Redis 6.0 or later, or a protocol-compatible server such as
+// Valkey — only core commands and server-side Lua are used, and CI runs
+// the conformance suites against both Redis and Valkey. Every script
+// touches exactly one key, so cluster deployments are supported too.
 package redistore
 
 import (
