@@ -55,6 +55,8 @@
 
 ### M1 — コア状態機械（`idemlease`）
 
+**状態: ✅ 完了（2026-07-12）**
+
 **成果物**
 - 型定義: `Action` / `Outcome` / `Decision` / `Record` / `Options` / `Store` インターフェース / sentinel（`ErrAlreadyExists` `ErrTokenMismatch` `ErrNotFound`）（§2.2, §3.2）
 - `Begin`: キー・指紋・ペイロードを不透明値として扱う。トークンを crypto/rand で生成（128bit 以上）して `Record` に載せ `Reserve` へ。判定表 §3.1（なし/期限切れ→`Proceed`、有効 reserved→`RejectInFlight`+残リース、completed 指紋一致→`Replay`、completed 指紋不一致→`RejectFingerprintMismatch`）
