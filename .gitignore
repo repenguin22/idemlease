@@ -1,0 +1,23 @@
+# Go build / test artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+/bin/
+/dist/
+
+# Multi-module workspace files (local development only)
+go.work
+go.work.sum
+
+# Vendor
+vendor/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
