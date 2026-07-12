@@ -53,3 +53,45 @@ jobs:
             exit 1
           fi
           echo 'OK: build deps are stdlib-only'
+
+  redistore:
+    name: redistore (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22.x", "stable"]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      REDIS_ADDR: localhost:6379
+    defaults:
+      run:
+        working-directory: redistore
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt differs:"
+            echo "$out"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      # 適合性テスト全件（idemleasetest + httpidemtest）を実 Redis に対して実行
+      - name: go test
+        run: go test -race ./...

@@ -117,6 +117,8 @@
 
 ### M5 — redistore（別 go.mod）
 
+**状態: ✅ 完了（2026-07-13）**
+
 **成果物**
 - go-redis 実装: Reserve = SET NX（PX）による単一原子操作（期限切れの原子的上書き含む）、Complete/Release = Lua スクリプトによる token CAS
 - トークンは保存・照合のみ（生成・改変しない — 適合性の保存忠実性テストで担保）
@@ -140,7 +142,8 @@
   - memstore の単一プロセス限定 / ベンチ結果 / フレームワーク対応方針（net/http・chi・gorilla はそのまま、Echo は WrapMiddleware、Gin は将来アダプタ、Fiber 非対応）/ ルート単位 Require の代替（ミドルウェアのルート単位適用）
 - DESIGN.md: §11 決定事項の背景（特に決定 12: コア/HTTP 分離）、キー文法・指紋設計のトレードオフ、Store セマンティクス、リースモデル
 - 使用例: net/http / chi / Echo 組み込み例
-- リリース前チェック: **§12 の受け入れ条件 14 項目を全て確認** → `v1.0.0` タグ（redistore は `redistore/v1.0.0`）
+- リリース前チェック: **§12 の受け入れ条件 14 項目を全て確認** → `v1.0.0` タグ
+- redistore のリリース手順: ルートを `v1.0.0` でタグ → redistore/go.mod の `replace` を外し `require github.com/repenguin22/idemlease v1.0.0` に更新 → `redistore/v1.0.0` をタグ
 
 ## 受け入れ条件（§12）↔ マイルストーン対応表
 
