@@ -144,6 +144,8 @@
 
 ### M7 — ドキュメント & v1.0.0 リリース
 
+**状態: ✅ 完了（2026-07-13）** — README 正式版（英語、日本語版は docs/README.ja.md）、DESIGN.md、godoc Example を整備。**§12 の受け入れ条件 14 項目すべての通過を確認**（1〜6,10,11,13,14: テストスイート / 7: memstore+redistore が CI で Redis・Valkey に対し全件通過 / 8: errtrailadapter カナリア / 9: README 必須記載 / 12: CI の net/http 非依存チェック稼働中）→ `v1.0.0` / `redistore/v1.0.0` をタグ。
+
 - README 正式版（§12-9 の必須記載）:
   - 保証の言明（冒頭）/ Complete 失敗時の冪等性の一時的弱化 / Discard ≠ 副作用なし / draft-07 の位置づけ（参考文献であり「準拠」を謳わない・2026-04-18 失効の事実）/ KeyScope 強推奨（セキュリティ節）
   - memstore の単一プロセス限定 / ベンチ結果 / フレームワーク対応方針（net/http・chi・gorilla はそのまま、Echo は WrapMiddleware、Gin は将来アダプタ、Fiber 非対応）/ ルート単位 Require の代替（ミドルウェアのルート単位適用）
@@ -189,4 +191,4 @@
 | モジュールパス | 決定（2026-07-12） | `github.com/repenguin22/idemlease` |
 | Go 最低バージョン | 決定（2026-07-12） | **1.22**（go directive）。契約 §10 の下限（`log/slog` = 1.21）を満たす。CI は 1.22.x と stable の 2 系でテスト |
 | テストヘルパー依存 | 決定（2026-07-12） | `_test.go` では go-cmp / testify 等を使用可（go-cmp v0.7.0 導入済み）。本体と公開適合性パッケージは stdlib のみを維持し、CI でビルド依存の stdlib-only を機械検証 |
-| 公開 README の言語 | 未決 | 提案: 英語（日本語版を docs/ に併置） |
+| 公開 README の言語 | 決定（2026-07-13） | 英語を正とし、日本語版を docs/README.ja.md に併置 |
