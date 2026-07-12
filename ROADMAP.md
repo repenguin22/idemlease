@@ -129,6 +129,13 @@
 
 ### M6 — 実証・性能
 
+**状態: ✅ 完了（2026-07-13）**
+
+**結果**
+- §12-8 ✅: `docs/prototypes/errtrailadapter` が実物 errtrail v1.3.2 に対して**公開 API のみ**でビルド・テスト通過（`ErrorWriter`＝sentinel→カスタムコード→problem.Write、`ReplayPolicy`＝`CodeOf`+`Retryable()` テーブル駆動+ステータス駆動フォールバック）。CI のカナリアジョブで常時検証
+- ベンチ ✅（Apple M1 Pro / memstore / httptest 込み）: ベースライン 1.68μs/op・21 allocs → 初回実行 5.33μs/op・57 allocs（**オーバーヘッド ≈ +3.7μs / +36 allocs**）、リプレイ 3.75μs/op、キーなし素通し +0.1μs。README 掲載値として確定（掲載は M7）
+- Echo E2E ✅: `e2e/echoe2e` — `echo.WrapMiddleware` の二重ラップ経由で捕捉・リプレイ・422・Flush 検知を確認
+
 - **errtrailadapter プロトタイプ**: 公開インターフェース（`ErrorWriter` / `ReplayPolicy` / `SetError`）のみで実装可能なことを検証（§9.1, §12-8）。v1 にはマージしない（検証目的）
 - **ベンチマーク**: リプレイなし経路（Begin → handler → Finish）のオーバーヘッドを計測し、README 掲載値を確定(§10)
 - **Echo E2E**: `echo.WrapMiddleware` 経由の組み込み、二重ラップでの捕捉・Flush 検知(§10)。**優先度は中 — リリース判定のブロッカーにしない**

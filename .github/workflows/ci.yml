@@ -103,3 +103,43 @@ jobs:
       # 適合性テスト全件（idemleasetest + httpidemtest）を実 Redis に対して実行
       - name: go test
         run: go test -race ./...
+
+  echo-e2e:
+    name: echo-e2e (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22.x", "stable"]
+    defaults:
+      run:
+        working-directory: e2e/echoe2e
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -race ./...
+
+  # §12-8 カナリア: errtrail アダプタが httpidem の公開 API のみで
+  # 実装可能であり続けることを機械的に担保する
+  errtrailadapter-prototype:
+    name: errtrailadapter prototype (canary)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs/prototypes/errtrailadapter
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -race ./...
