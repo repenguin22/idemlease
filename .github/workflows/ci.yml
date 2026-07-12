@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.22.x = go.mod の下限、stable = 最新リリース
+        go: ["1.22.x", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt differs:"
+            echo "$out"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -race ./...
+      # 契約 §12-12: コアパッケージは net/http に（推移的にも）依存しない
+      - name: core must not depend on net/http (REQUIREMENTS §12-12)
+        run: |
+          if go list -deps . | grep -qx 'net/http'; then
+            echo 'NG: core package depends on net/http'
+            exit 1
+          fi
+          echo 'OK: core package does not depend on net/http'

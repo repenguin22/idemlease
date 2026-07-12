@@ -1,5 +1,7 @@
 # idemlease
 
+[![CI](https://github.com/repenguin22/idemlease/actions/workflows/ci.yml/badge.svg)](https://github.com/repenguin22/idemlease/actions/workflows/ci.yml)
+
 `Idempotency-Key` ヘッダによる冪等性保証を HTTP API に追加する Go ライブラリ。
 コア（状態機械）は依存ゼロ（stdlib のみ・`net/http` 非依存）で、HTTP 統合・ストア実装はパッケージとして分離される。
 

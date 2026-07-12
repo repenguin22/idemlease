@@ -45,11 +45,11 @@
 
 - [x] `git init`（main ブランチ）/ `.gitignore` / `.gitattributes`
 - [x] ROADMAP.md / README（暫定版）/ docs/REQUIREMENTS.md（契約 v3.4 の取り込み）
-- [ ] `go.mod` 作成（モジュールパス確定 → 未決事項参照）
-- [ ] LICENSE 選定・配置（→ 未決事項）
-- [ ] GitHub リポジトリ作成・リモート設定・初回 push
-- [ ] CI（GitHub Actions）: `gofmt` / `go vet` / `go test -race ./...`
-- [ ] CI: **コアパッケージの `net/http` 非依存チェック**（§12-12。`go list -deps` の結果に `net/http` が含まれないことを機械検証）
+- [x] `go.mod` 作成（`github.com/repenguin22/idemlease`、go 1.22）+ コアパッケージの器（doc.go）
+- [x] LICENSE（MIT）
+- [x] GitHub リモート設定・初回 push（https://github.com/repenguin22/idemlease）
+- [x] CI（GitHub Actions）: `gofmt` / `go vet` / `go test -race ./...`（Go 1.22.x + stable のマトリクス）
+- [x] CI: **コアパッケージの `net/http` 非依存チェック**（§12-12。`go list -deps` の結果に `net/http` が含まれないことを機械検証）
 
 **Exit criteria**: 空のコアパッケージで CI がグリーン。
 
@@ -162,11 +162,11 @@
 - **gRPC interceptor**（別 go.mod）: metadata キー名の定義から着手。Store と状態機械はコアを完全共有（§9.4）
 - その他: ペイロード圧縮、ORM 向けトランザクション合流アダプタ（§9.5）
 
-## 未決事項
+## 決定・未決事項
 
-| 項目 | 状態 | 提案 |
+| 項目 | 状態 | 内容 |
 |---|---|---|
-| LICENSE | 未決 | MIT |
-| モジュールパス | 未決 | `github.com/repenguin22/idemlease`（errtrail と同オーナー） |
-| Go 最低バージョン | 未決 | 契約 §10「使用 stdlib API から決定」→ 下限は `log/slog` が規定する **1.21**。go directive は 1.21、CI は直近 2 系でテスト |
-| 公開 README の言語 | 未決 | 英語（日本語版を docs/ に併置） |
+| LICENSE | 決定（2026-07-12） | MIT |
+| モジュールパス | 決定（2026-07-12） | `github.com/repenguin22/idemlease` |
+| Go 最低バージョン | 決定（2026-07-12） | **1.22**（go directive）。契約 §10 の下限（`log/slog` = 1.21）を満たす。CI は 1.22.x と stable の 2 系でテスト |
+| 公開 README の言語 | 未決 | 提案: 英語（日本語版を docs/ に併置） |
