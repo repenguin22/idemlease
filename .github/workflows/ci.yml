@@ -104,6 +104,51 @@ jobs:
       - name: go test
         run: go test -race ./...
 
+  pgstore:
+    name: pgstore (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22.x", "stable"]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: idemlease_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PG_DSN: "postgres://postgres:postgres@localhost:5432/idemlease_test?sslmode=disable"
+    defaults:
+      run:
+        working-directory: pgstore
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt differs:"
+            echo "$out"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      # 適合性テスト全件（idemleasetest + httpidemtest）を実 PostgreSQL に対して実行
+      - name: go test
+        run: go test -race ./...
+
   ginadapter:
     name: ginadapter (go ${{ matrix.go }})
     runs-on: ubuntu-latest

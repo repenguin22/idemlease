@@ -210,11 +210,13 @@
 
 ### M11 — pgstore（Store 実装）
 
-- PostgreSQL 実装: Reserve = 単文 upsert（`INSERT ... ON CONFLICT ... WHERE 期限切れ`）、Complete/Release = token CAS `UPDATE`/`DELETE`
-- **期限権威は DB クロック**（`now()` 基準。v1.0.1 レビュー M1 の教訓: 期限は「残余時間」で返しローカル時計で再構成）
-- 期限切れ行の物理削除ヘルパー（`Sweep`）
-- CI: postgres コンテナで適合性 3 スイート全件
-- Exit: §12-7 相当（idemleasetest / httpidemtest 全件）
+**状態: ✅ 完了（2026-07-13）** — `pgstore/`（別 go.mod、database/sql のみ依存・ドライバは利用側。テストは pgx/v5 stdlib）。
+
+- PostgreSQL 実装: Reserve = 単文 upsert（`INSERT ... ON CONFLICT DO UPDATE ... WHERE 期限切れ`、失った場合のみ existing を別 SELECT + 消失レースの有界リトライ）、Complete/Release = token CAS `UPDATE`/`DELETE` + 0 行時の分類 SELECT
+- **期限権威は DB クロック**（すべて `now()` 基準。残余ミリ秒で返しローカル時計で再構成 = v1.0.1 レビュー M1 の教訓を最初から適用）
+- `Schema(table)` / `Table(name)` / 期限切れ行の物理削除 `Sweep(ctx, limit)`
+- CI: postgres:16-alpine コンテナで適合性 3 スイート全件 + Sweep + `-race`
+- Exit: §12-7 相当（idemleasetest / httpidemtest 全件）✅
 
 ### M12 — CompleteTx + httpidem 連携（マトリクス実装）
 
