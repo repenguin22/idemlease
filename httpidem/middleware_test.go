@@ -2,6 +2,7 @@ package httpidem_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -664,6 +665,96 @@ func TestImplicitOKPersisted(t *testing.T) {
 	}
 	if count.Load() != 1 {
 		t.Fatalf("handler ran %d times, want 1", count.Load())
+	}
+}
+
+// TestCompressedResponseReplaysIntact pins the fix for the v1.0.0
+// review finding H1: a handler-written compressed body must replay with
+// its Content-Encoding, and the replayed bytes must still decompress.
+func TestCompressedResponseReplaysIntact(t *testing.T) {
+	const plain = `{"id":42}`
+	var gzBody bytes.Buffer
+	zw := gzip.NewWriter(&gzBody)
+	_, _ = zw.Write([]byte(plain))
+	_ = zw.Close()
+
+	h := httpidem.New(memstore.New(), httpidem.Logger(quietLogger()))(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Encoding", "gzip")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write(gzBody.Bytes())
+		}))
+
+	do(h, "POST", "/x", "k", "b")
+	replay := do(h, "POST", "/x", "k", "b")
+	if replay.Header().Get(httpidem.HeaderIdempotencyReplayed) != "true" {
+		t.Fatal("second request must be a replay")
+	}
+	if got := replay.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("replayed Content-Encoding = %q, want gzip (default allowlist)", got)
+	}
+	if !bytes.Equal(replay.Body.Bytes(), gzBody.Bytes()) {
+		t.Fatal("replayed body must be the stored compressed bytes")
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(replay.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("replayed body is not valid gzip: %v", err)
+	}
+	decoded, err := io.ReadAll(zr)
+	if err != nil || string(decoded) != plain {
+		t.Fatalf("decompressed replay = (%q, %v), want %q", decoded, err, plain)
+	}
+}
+
+// TestLowercaseMethodIsProtected pins the fix for review finding N1:
+// method matching is case-insensitive, like the Methods option.
+func TestLowercaseMethodIsProtected(t *testing.T) {
+	fs := newFailingStore()
+	var count atomic.Int32
+	h := httpidem.New(fs, httpidem.Logger(quietLogger()))(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			count.Add(1)
+			w.WriteHeader(http.StatusCreated)
+		}))
+	if rr := do(h, "post", "/x", "k", "b"); rr.Code != http.StatusCreated {
+		t.Fatalf("code = %d, want 201", rr.Code)
+	}
+	if fs.reserveCalls.Load() != 1 {
+		t.Fatalf("Reserve called %d times, want 1 (lowercase method must be processed)", fs.reserveCalls.Load())
+	}
+	rr := do(h, "post", "/x", "k", "b")
+	if rr.Header().Get(httpidem.HeaderIdempotencyReplayed) != "true" || count.Load() != 1 {
+		t.Fatalf("retry = (replayed=%q, handler=%d), want a replay after 1 execution",
+			rr.Header().Get(httpidem.HeaderIdempotencyReplayed), count.Load())
+	}
+}
+
+// TestReplayRefusesOversizedPayload pins the fix for review finding M3:
+// a stored payload beyond the configured limits (foreign data) must be
+// refused instead of allocated and served.
+func TestReplayRefusesOversizedPayload(t *testing.T) {
+	store := memstore.New()
+	ctx := context.Background()
+	body := "b"
+	fp := httpidem.Fingerprint("POST", mustURL(t, "/x"), []byte(body))
+	if _, err := store.Reserve(ctx, idemlease.Record{
+		Key: "k", State: idemlease.StateReserved, Token: "t",
+		Fingerprint: fp, LeaseExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Complete(ctx, "k", "t", make([]byte, 2<<20), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	h := httpidem.New(store, httpidem.Logger(quietLogger()))(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Error("handler must not run on the replay path")
+		}))
+	rr := do(h, "POST", "/x", "k", body)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("code = %d, want 500 for an oversized stored payload", rr.Code)
 	}
 }
 

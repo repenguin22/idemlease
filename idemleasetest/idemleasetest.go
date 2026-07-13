@@ -135,6 +135,9 @@ func RunStoreTests(t *testing.T, newStore func(t *testing.T) idemlease.Store) {
 			t.Errorf("existing.Fingerprint = %q, want %q", existing.Fingerprint, "fp-first")
 		}
 		assertTimeClose(t, "existing.LeaseExpiresAt", existing.LeaseExpiresAt, first.LeaseExpiresAt)
+		if existing.Expired(time.Now()) {
+			t.Error("existing must be a live record: expired records are never returned (§3.2)")
+		}
 
 		got, err := st.Get(ctx, "k")
 		if err != nil || got == nil || got.Token != "tok-first" {
@@ -163,6 +166,9 @@ func RunStoreTests(t *testing.T, newStore func(t *testing.T) idemlease.Store) {
 		}
 		if !bytes.Equal(existing.Fingerprint, fp) {
 			t.Errorf("existing.Fingerprint = %q, want %q", existing.Fingerprint, fp)
+		}
+		if existing.Expired(time.Now()) {
+			t.Error("existing must be a live record: expired records are never returned (§3.2)")
 		}
 	})
 

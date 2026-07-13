@@ -103,41 +103,52 @@ func (o Options) recordTTL() time.Duration {
 // extreme case token generation) before any idempotency decision was
 // made; interpreting it as fail-open or fail-closed is the caller's
 // responsibility.
+//
+// Begin also defends against stores that break the §3.2 contract:
+// receiving an already-expired record as existing is retried — the
+// record may have expired legitimately in the instants after the
+// store's atomic check — and reported as a store bug if it persists.
 func Begin(ctx context.Context, s Store, key string, fingerprint []byte, o Options) (Outcome, error) {
 	token, err := newToken()
 	if err != nil {
 		return Outcome{}, err
 	}
-	existing, err := s.Reserve(ctx, Record{
-		Key:            key,
-		Fingerprint:    bytes.Clone(fingerprint),
-		State:          StateReserved,
-		Token:          token,
-		LeaseExpiresAt: time.Now().Add(o.leaseTTL()),
-	})
-	if err == nil {
-		return Outcome{Action: Proceed, Token: token}, nil
-	}
-	if !errors.Is(err, ErrAlreadyExists) {
-		return Outcome{}, err
-	}
-	if existing == nil {
-		return Outcome{}, fmt.Errorf("idemlease: store returned ErrAlreadyExists without the existing record")
-	}
-	switch existing.State {
-	case StateReserved:
-		retryAfter := time.Until(existing.LeaseExpiresAt)
-		if retryAfter < 0 {
-			retryAfter = 0
+	const maxAttempts = 3
+	for attempt := 1; ; attempt++ {
+		existing, err := s.Reserve(ctx, Record{
+			Key:            key,
+			Fingerprint:    bytes.Clone(fingerprint),
+			State:          StateReserved,
+			Token:          token,
+			LeaseExpiresAt: time.Now().Add(o.leaseTTL()),
+		})
+		if err == nil {
+			return Outcome{Action: Proceed, Token: token}, nil
 		}
-		return Outcome{Action: RejectInFlight, RetryAfter: retryAfter}, nil
-	case StateCompleted:
-		if bytes.Equal(existing.Fingerprint, fingerprint) {
-			return Outcome{Action: Replay, Payload: existing.Payload}, nil
+		if !errors.Is(err, ErrAlreadyExists) {
+			return Outcome{}, err
 		}
-		return Outcome{Action: RejectFingerprintMismatch}, nil
-	default:
-		return Outcome{}, fmt.Errorf("idemlease: store returned existing record with invalid state %d", existing.State)
+		if existing == nil {
+			return Outcome{}, fmt.Errorf("idemlease: store returned ErrAlreadyExists without the existing record")
+		}
+		now := time.Now()
+		if existing.Expired(now) {
+			if attempt < maxAttempts {
+				continue // it just expired; the next Reserve should claim it
+			}
+			return Outcome{}, fmt.Errorf("idemlease: store keeps returning an expired record as existing (contract violation)")
+		}
+		switch existing.State {
+		case StateReserved:
+			return Outcome{Action: RejectInFlight, RetryAfter: existing.LeaseExpiresAt.Sub(now)}, nil
+		case StateCompleted:
+			if bytes.Equal(existing.Fingerprint, fingerprint) {
+				return Outcome{Action: Replay, Payload: existing.Payload}, nil
+			}
+			return Outcome{Action: RejectFingerprintMismatch}, nil
+		default:
+			return Outcome{}, fmt.Errorf("idemlease: store returned existing record with invalid state %d", existing.State)
+		}
 	}
 }
 

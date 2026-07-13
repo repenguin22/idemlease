@@ -120,10 +120,19 @@ normal replay/409/422 behavior within its own scope.
 
 Status code, allowlisted headers, and the body — up to
 `MaxResponseBody` (default 1 MiB). The default header allowlist is
-`Content-Type`, `Content-Language`, `Location`; change it with
-`StoreHeaders(...)`. **`Set-Cookie`, `Authorization`, and hop-by-hop
+`Content-Type`, `Content-Language`, `Content-Encoding`,
+`Content-Disposition`, `Location`; change it with `StoreHeaders(...)`,
+but keep the headers a client needs to *interpret* the body
+(`Content-Encoding` above all) or replays of compressed bodies arrive
+unlabelled and corrupt. **`Set-Cookie`, `Authorization`, and hop-by-hop
 headers are never replayed, even if you allowlist them** — replaying
 one client's session to another would be a credential leak.
+
+Compression: prefer placing compression middleware *outside* idemlease,
+so each response (including replays) is compressed per-request. If the
+handler writes pre-compressed bodies instead, they are stored and
+replayed as-is — note a retry with a different `Accept-Encoding` still
+receives the originally stored encoding.
 
 Not stored (delivered to the client, then discarded):
 
@@ -131,6 +140,10 @@ Not stored (delivered to the client, then discarded):
   calls `Flush` or `Hijack`
 - Responses larger than `MaxResponseBody`
 - Whatever the replay policy says to discard (next section)
+
+Handlers must finish writing before they return: like net/http itself,
+the capture is not safe against writes from background goroutines that
+outlive the handler.
 
 ## Replay policy
 

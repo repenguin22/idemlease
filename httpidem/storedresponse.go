@@ -28,6 +28,14 @@ const storedResponseVersion = 0x01
 
 var errCorruptStoredResponse = errors.New("httpidem: corrupted stored response payload")
 
+// Decoder sanity limits: a payload written by the capture path holds a
+// handful of allowlisted headers, so anything past these counts is
+// foreign data and is refused before it can drive allocations.
+const (
+	maxHeaderNames  = 1024
+	maxHeaderValues = 1024
+)
+
 func appendString(buf []byte, s string) []byte {
 	buf = binary.AppendUvarint(buf, uint64(len(s)))
 	return append(buf, s...)
@@ -70,10 +78,16 @@ func (sr *StoredResponse) UnmarshalBinary(data []byte) error {
 	d := decoder{buf: data[1:]}
 	status := d.uvarint()
 	nNames := d.uvarint()
+	if nNames > maxHeaderNames {
+		return errCorruptStoredResponse
+	}
 	header := make(http.Header)
 	for i := uint64(0); i < nNames && d.err == nil; i++ {
 		name := d.string()
 		nValues := d.uvarint()
+		if nValues > maxHeaderValues {
+			return errCorruptStoredResponse
+		}
 		for j := uint64(0); j < nValues && d.err == nil; j++ {
 			header[name] = append(header[name], d.string())
 		}

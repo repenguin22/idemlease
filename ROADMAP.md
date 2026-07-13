@@ -154,6 +154,18 @@
 - リリース前チェック: **§12 の受け入れ条件 14 項目を全て確認** → `v1.0.0` タグ
 - redistore のリリース手順: ルートを `v1.0.0` でタグ → redistore/go.mod の `replace` を外し `require github.com/repenguin22/idemlease v1.0.0` に更新 → `redistore/v1.0.0` をタグ
 
+### v1.0.1 — 外部レビュー対応
+
+**状態: ✅ 完了（2026-07-13）** — v1.0.0 の外部レビュー（[docs/review/v1.0.0-external-review.md](docs/review/v1.0.0-external-review.md)）の指摘に対応。
+
+- **H1**: デフォルト保存ヘッダに `Content-Encoding` / `Content-Disposition` を追加（圧縮応答のリプレイ破壊を修正。契約 §4.4 からの逸脱として errata 記録）
+- **M1**: redistore の期限を PTTL 権威に一本化（ノード間クロックスキュー耐性。スキュー注入の実 Redis 回帰テスト追加）
+- **M2**: `Begin` が期限切れ existing を有界リトライで防御（良性レースは回復、継続する契約違反はエラー）
+- **M3**: リプレイ経路にペイロード上限 + デコーダ件数上限
+- **M5/L1/N1**: Body Close・ContentLength 更新・メソッド比較の大文字化
+- **M6**: 契約 §6.1 の Flusher 透過解釈を REQUIREMENTS の errata として明文化
+- 見送り: L4（二重警告は実際には発生しないことを検証済み）、N2（仕様どおり）、N3（指紋は秘密でない）
+
 ## 受け入れ条件（§12）↔ マイルストーン対応表
 
 | §12 | 内容（要約） | マイルストーン |

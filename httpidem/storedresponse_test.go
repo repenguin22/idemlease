@@ -1,6 +1,7 @@
 package httpidem_test
 
 import (
+	"encoding/binary"
 	"net/http"
 	"testing"
 
@@ -78,5 +79,24 @@ func TestStoredResponseUnmarshalRejectsBadPayloads(t *testing.T) {
 				t.Fatalf("UnmarshalBinary accepted %v, want error", tt.data)
 			}
 		})
+	}
+}
+
+// TestStoredResponseRejectsExcessiveHeaderCounts pins the decoder caps
+// from review finding M3: a syntactically valid payload claiming
+// thousands of headers is foreign data and must be refused.
+func TestStoredResponseRejectsExcessiveHeaderCounts(t *testing.T) {
+	buf := []byte{0x01}
+	buf = binary.AppendUvarint(buf, 200)  // status
+	buf = binary.AppendUvarint(buf, 2048) // header names: over the cap
+	for i := 0; i < 2048; i++ {
+		buf = binary.AppendUvarint(buf, 0) // empty name
+		buf = binary.AppendUvarint(buf, 0) // zero values
+	}
+	buf = binary.AppendUvarint(buf, 0) // empty body
+
+	var sr httpidem.StoredResponse
+	if err := sr.UnmarshalBinary(buf); err == nil {
+		t.Fatal("UnmarshalBinary accepted a payload with 2048 header names, want error")
 	}
 }

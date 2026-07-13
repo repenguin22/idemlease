@@ -66,9 +66,13 @@ httpidem.KeyScope(func(r *http.Request) string {
 
 ## 何が保存・リプレイされるか
 
-ステータスコード + allowlist ヘッダ + ボディ（`MaxResponseBody`、既定 1 MiB まで）。ヘッダ allowlist の既定は `Content-Type` / `Content-Language` / `Location`（`StoreHeaders(...)` で変更可）。**`Set-Cookie`・`Authorization`・hop-by-hop ヘッダは allowlist に載せてもリプレイされない** — 他クライアントへのセッション漏洩を防ぐため。
+ステータスコード + allowlist ヘッダ + ボディ（`MaxResponseBody`、既定 1 MiB まで）。ヘッダ allowlist の既定は `Content-Type` / `Content-Language` / `Content-Encoding` / `Content-Disposition` / `Location`（`StoreHeaders(...)` で変更可。ただしボディの解釈に必要なヘッダ — 特に `Content-Encoding` — を外すと、圧縮ボディがラベルなしでリプレイされ壊れる）。**`Set-Cookie`・`Authorization`・hop-by-hop ヘッダは allowlist に載せてもリプレイされない** — 他クライアントへのセッション漏洩を防ぐため。
+
+圧縮は idemlease の**外側**に圧縮ミドルウェアを置くのを推奨（リプレイ含め毎回リクエストに応じて圧縮される）。ハンドラが圧縮済みボディを直接書く場合はそのまま保存・リプレイされる — 異なる `Accept-Encoding` での再送にも保存時のエンコーディングが返る点に注意。
 
 保存されないもの（クライアントには届いたうえで破棄）: ストリーミング応答（`Flush`/`Hijack` 時点で捕捉放棄）、`MaxResponseBody` 超過、リプレイポリシーが Discard としたもの。
+
+ハンドラは return 前に書き込みを終えること。net/http 自体と同様、ハンドラより長生きする goroutine からの書き込みに対して捕捉は安全でない。
 
 ## リプレイポリシー
 

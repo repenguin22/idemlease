@@ -89,11 +89,15 @@ Four methods, three sentinels, and two rules that carry all the safety:
 Expiry is *logical*: a reserved record past its lease deadline and a
 completed record past its record TTL are absent, whatever bytes may
 still exist. memstore checks timestamps lazily; redistore binds the
-record's lifetime to Redis TTLs (relative `PEXPIRE`, so app/Redis clock
-skew cannot corrupt semantics) and gets the atomic-overwrite property
-for free — expired keys simply do not exist. Store bugs are surfaced,
-not absorbed: `Begin` reports a contract violation (an `existing`
-record that is nil or malformed) as an error rather than guessing.
+record's lifetime to Redis TTLs (relative `PEXPIRE`) and reconstructs
+the deadlines it reports from `PTTL`, making the Redis clock the single
+expiry authority — neither app↔Redis nor app↔app clock skew can corrupt
+lease semantics, and expired keys simply do not exist (this design was
+tightened by the v1.0.0 external review, finding M1). Store bugs are
+surfaced, not absorbed: `Begin` reports a nil or malformed `existing`
+record as an error, and retries a bounded number of times when handed
+an already-expired record — which can also happen legitimately when the
+record expires in the instants after the store's atomic check.
 
 ## HTTP decisions worth explaining
 

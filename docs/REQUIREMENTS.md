@@ -1,4 +1,9 @@
 > **リポジトリ注記**: 本文書は idemlease の**実装契約**（要件定義 v3.4）である。文書中の `idemtrail` は仮名称であり、本リポジトリでは `idemlease` に読み替える（パッケージ対応表は [ROADMAP.md](../ROADMAP.md) 冒頭を参照）。以下、原文は変更していない。
+>
+> **実装上の確定逸脱（errata）**: 原文 v3.4 から以下の 2 点を意図的に変更して実装している（v1.0.0 外部レビューを受けて確定。経緯は [docs/review/v1.0.0-external-review.md](review/v1.0.0-external-review.md)、設計理由は [DESIGN.md](../DESIGN.md)）。
+>
+> 1. **§6.1 の Flusher/Hijacker/Pusher 透過**: 原文は「元 writer が実装する場合のみ透過」。実装はラッパーが常にこれらのメソッドを持ち、`http.NewResponseController` 経由で委譲する（元 writer 非対応時は `http.ErrNotSupported` が返る）。二重ラップ環境（Echo 等）での実用性を優先した解釈（レビュー指摘 M6）
+> 2. **§4.4 のデフォルト保存ヘッダ allowlist**: 原文の `Content-Type` / `Content-Language` / `Location` に **`Content-Encoding` / `Content-Disposition` を追加**（v1.0.1〜）。圧縮済みボディが `Content-Encoding` なしでリプレイされ破壊される欠陥の修正（レビュー指摘 H1）
 
 ---
 

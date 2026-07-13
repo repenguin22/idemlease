@@ -139,6 +139,32 @@ func (f *fakeStore) Get(ctx context.Context, key string) (*idemlease.Record, err
 	return &cp, nil
 }
 
+var _ idemlease.Store = (*scriptedStore)(nil)
+
+// scriptedStore returns canned Reserve responses in sequence (the last
+// entry repeats), for exercising Begin's defenses against misbehaving
+// stores across retries.
+type scriptedStore struct {
+	stubStore
+	responses []scriptedReserve
+	calls     int
+}
+
+type scriptedReserve struct {
+	existing *idemlease.Record
+	err      error
+}
+
+func (s *scriptedStore) Reserve(context.Context, idemlease.Record) (*idemlease.Record, error) {
+	i := s.calls
+	if i >= len(s.responses) {
+		i = len(s.responses) - 1
+	}
+	s.calls++
+	r := s.responses[i]
+	return r.existing, r.err
+}
+
 var _ idemlease.Store = (*stubStore)(nil)
 
 // stubStore returns canned Reserve responses, for exercising Begin

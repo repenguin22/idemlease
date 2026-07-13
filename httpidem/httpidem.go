@@ -41,6 +41,12 @@ const (
 	DefaultMaxResponseBody int   = 1 << 20
 )
 
+// maxStoredResponseOverhead bounds the non-body bytes (status, headers,
+// framing) accepted when decoding a stored payload: anything larger
+// than MaxResponseBody plus this margin cannot have been written by the
+// capture path and is refused instead of allocated.
+const maxStoredResponseOverhead = 64 << 10
+
 type config struct {
 	require         bool
 	leaseTTL        time.Duration
@@ -115,10 +121,13 @@ func Methods(methods ...string) Option {
 }
 
 // StoreHeaders replaces the allowlist of response headers captured for
-// replay (default Content-Type, Content-Language, Location). The
-// always-excluded headers — Set-Cookie, Authorization, and hop-by-hop
-// headers — are dropped even if listed, to prevent session leakage
-// across clients (§4.4).
+// replay (default Content-Type, Content-Language, Content-Encoding,
+// Content-Disposition, Location). Headers the client needs to interpret
+// the body — Content-Encoding in particular — must stay allowlisted, or
+// replays of, say, gzip-written bodies arrive unlabelled and corrupt.
+// The always-excluded headers — Set-Cookie, Authorization, and
+// hop-by-hop headers — are dropped even if listed, to prevent session
+// leakage across clients (§4.4).
 func StoreHeaders(names ...string) Option {
 	return func(c *config) { c.storeHeaders = append([]string(nil), names...) }
 }
@@ -160,7 +169,7 @@ func New(store idemlease.Store, opts ...Option) func(http.Handler) http.Handler 
 		policy:          DefaultPolicy,
 		errorWriter:     problemWriter{},
 		methods:         map[string]bool{http.MethodPost: true, http.MethodPatch: true},
-		storeHeaders:    []string{"Content-Type", "Content-Language", "Location"},
+		storeHeaders:    []string{"Content-Type", "Content-Language", "Content-Encoding", "Content-Disposition", "Location"},
 		logger:          slog.Default(),
 		replayedHeader:  true,
 	}
@@ -180,7 +189,7 @@ type middleware struct {
 
 func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cfg := m.cfg
-	if !cfg.methods[r.Method] {
+	if !cfg.methods[strings.ToUpper(r.Method)] {
 		m.next.ServeHTTP(w, r)
 		return
 	}
@@ -217,7 +226,11 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m.next.ServeHTTP(w, r)
 		return
 	}
+	if r.Body != nil {
+		_ = r.Body.Close() // fully read; the buffered copy below replaces it
+	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
 
 	fingerprint := Fingerprint(r.Method, r.URL, body)
 	scope := ""
@@ -329,6 +342,12 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *middleware) writeReplay(w http.ResponseWriter, r *http.Request, scope, key string, payload []byte) {
+	if len(payload) > m.cfg.maxResponseBody+maxStoredResponseOverhead {
+		m.cfg.logger.Error("httpidem: stored payload exceeds the configured response limits; refusing to replay",
+			append(m.keyAttrs(scope, key), slog.Int("payload_bytes", len(payload)))...)
+		m.cfg.errorWriter.WriteError(w, r, http.StatusInternalServerError, errCorruptStoredResponse)
+		return
+	}
 	var sr StoredResponse
 	if err := sr.UnmarshalBinary(payload); err != nil {
 		m.cfg.logger.Error("httpidem: stored response payload is corrupted",

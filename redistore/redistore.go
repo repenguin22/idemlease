@@ -11,9 +11,13 @@
 // are stored as raw binary hash fields, never generated or altered here
 // (§2.2).
 //
-// Expiry TTLs are computed as durations on the application side and
-// applied relative to the Redis server clock, so moderate clock skew
-// between application and Redis does not corrupt lease semantics.
+// Expiry is owned by Redis: TTLs are applied relative to the Redis
+// server clock, and the deadlines reported back to the core
+// (LeaseExpiresAt / RecordExpiresAt) are reconstructed from PTTL, so
+// neither application-to-Redis nor application-to-application clock
+// skew can corrupt lease semantics. The absolute *_exp_ms hash fields
+// are informational (debugging via redis-cli); they are never used for
+// expiry decisions.
 //
 // Requires Redis 6.0 or later, or a protocol-compatible server such as
 // Valkey — only core commands and server-side Lua are used, and CI runs
@@ -23,6 +27,7 @@ package redistore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -38,8 +43,9 @@ const (
 )
 
 // reserveScript atomically claims the key: if a live record exists it
-// is returned as the HGETALL field list; otherwise the reservation is
-// written with its lease TTL.
+// is returned as {PTTL, HGETALL fields}; otherwise the reservation is
+// written with its lease TTL. PTTL is captured in the same atomic
+// script so the caller can rebuild the deadline on its own clock.
 //
 //	KEYS[1] = record key
 //	ARGV[1] = state ("1"), ARGV[2] = token, ARGV[3] = fingerprint,
@@ -47,11 +53,22 @@ const (
 //	ARGV[5] = lease TTL (ms, relative)
 var reserveScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[1]) == 1 then
-  return redis.call('HGETALL', KEYS[1])
+  return {redis.call('PTTL', KEYS[1]), redis.call('HGETALL', KEYS[1])}
 end
 redis.call('HSET', KEYS[1], 'state', ARGV[1], 'token', ARGV[2], 'fp', ARGV[3], 'lease_exp_ms', ARGV[4])
 redis.call('PEXPIRE', KEYS[1], ARGV[5])
 return 'OK'
+`)
+
+// getScript reads a live record as {PTTL, HGETALL fields}, or false
+// when the key does not exist.
+//
+//	KEYS[1] = record key
+var getScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then
+  return false
+end
+return {redis.call('PTTL', KEYS[1]), redis.call('HGETALL', KEYS[1])}
 `)
 
 // completeScript is the reserved→completed transition with a token CAS.
@@ -149,14 +166,8 @@ func (s *Store) Reserve(ctx context.Context, rec idemlease.Record) (*idemlease.R
 	switch v := res.(type) {
 	case string: // "OK": the key was claimed
 		return nil, nil
-	case []interface{}: // HGETALL of the live existing record
-		fields := make(map[string]string, len(v)/2)
-		for i := 0; i+1 < len(v); i += 2 {
-			name, _ := v[i].(string)
-			value, _ := v[i+1].(string)
-			fields[name] = value
-		}
-		existing, err := recordFromFields(rec.Key, fields)
+	case []interface{}: // {PTTL, fields} of the live existing record
+		existing, err := recordFromReply(rec.Key, v)
 		if err != nil {
 			return nil, err
 		}
@@ -196,14 +207,58 @@ func (s *Store) Release(ctx context.Context, key, token string) error {
 // Get implements idemlease.Store. Expired records are reported as
 // (nil, nil) because Redis has already removed them.
 func (s *Store) Get(ctx context.Context, key string) (*idemlease.Record, error) {
-	fields, err := s.client.HGetAll(ctx, s.redisKey(key)).Result()
+	res, err := getScript.Run(ctx, s.client, []string{s.redisKey(key)}).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("redistore: get: %w", err)
 	}
-	if len(fields) == 0 {
-		return nil, nil
+	reply, ok := res.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("redistore: get: unexpected script result %T", res)
 	}
-	return recordFromFields(key, fields)
+	return recordFromReply(key, reply)
+}
+
+// recordFromReply decodes a {PTTL, HGETALL fields} script reply. The
+// active deadline is rebuilt from PTTL on the local clock: Redis's TTL
+// is the single expiry authority, so a record written by a node with a
+// skewed clock still reads as live for exactly as long as Redis keeps
+// it (and its Retry-After stays sane).
+func recordFromReply(key string, reply []interface{}) (*idemlease.Record, error) {
+	if len(reply) != 2 {
+		return nil, fmt.Errorf("redistore: malformed script reply for %q: %d elements", key, len(reply))
+	}
+	pttlMs, ok := reply[0].(int64)
+	if !ok {
+		return nil, fmt.Errorf("redistore: malformed PTTL for %q: %T", key, reply[0])
+	}
+	rawFields, ok := reply[1].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("redistore: malformed field list for %q: %T", key, reply[1])
+	}
+	fields := make(map[string]string, len(rawFields)/2)
+	for i := 0; i+1 < len(rawFields); i += 2 {
+		name, _ := rawFields[i].(string)
+		value, _ := rawFields[i+1].(string)
+		fields[name] = value
+	}
+	rec, err := recordFromFields(key, fields)
+	if err != nil {
+		return nil, err
+	}
+	if pttlMs < 0 { // -1: a key without TTL was not written by this store
+		return nil, fmt.Errorf("redistore: record %q has no TTL", key)
+	}
+	deadline := time.Now().Add(time.Duration(pttlMs) * time.Millisecond)
+	switch rec.State {
+	case idemlease.StateReserved:
+		rec.LeaseExpiresAt = deadline
+	case idemlease.StateCompleted:
+		rec.RecordExpiresAt = deadline
+	}
+	return rec, nil
 }
 
 func statusToErr(res interface{}, op string) error {

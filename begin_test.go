@@ -213,6 +213,41 @@ func TestBeginStoreMisbehavior(t *testing.T) {
 	})
 }
 
+// TestBeginRetriesExpiredExisting pins Begin's defense against expired
+// existing records (§3.2 says stores must never return them, but the
+// record can also expire legitimately right after the store's check).
+func TestBeginRetriesExpiredExisting(t *testing.T) {
+	expired := &idemlease.Record{
+		Key: "k", State: idemlease.StateReserved,
+		Token: "stale", LeaseExpiresAt: time.Now().Add(-time.Second),
+	}
+
+	t.Run("recovers when a retry claims the key", func(t *testing.T) {
+		st := &scriptedStore{responses: []scriptedReserve{
+			{existing: expired, err: idemlease.ErrAlreadyExists},
+			{existing: nil, err: nil},
+		}}
+		out, err := idemlease.Begin(context.Background(), st, "k", nil, testOpts)
+		if err != nil || out.Action != idemlease.Proceed {
+			t.Fatalf("Begin = (%+v, %v), want Proceed after one retry", out, err)
+		}
+		if st.calls != 2 {
+			t.Fatalf("Reserve called %d times, want 2", st.calls)
+		}
+	})
+	t.Run("gives up on a store that keeps returning expired records", func(t *testing.T) {
+		st := &scriptedStore{responses: []scriptedReserve{
+			{existing: expired, err: idemlease.ErrAlreadyExists},
+		}}
+		if _, err := idemlease.Begin(context.Background(), st, "k", nil, testOpts); err == nil {
+			t.Fatal("want a contract-violation error, got nil")
+		}
+		if st.calls != 3 {
+			t.Fatalf("Reserve called %d times, want 3 (bounded retries)", st.calls)
+		}
+	})
+}
+
 // TestBeginConcurrentSameKey hammers one key from 100 goroutines and
 // checks that exactly one wins the lease (§10, run with -race).
 func TestBeginConcurrentSameKey(t *testing.T) {
