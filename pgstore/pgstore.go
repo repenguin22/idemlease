@@ -105,6 +105,11 @@ func New(db *sql.DB, opts ...Option) *Store {
 		stateReserved, stateCompleted)
 	expired := fmt.Sprintf(`((state = %d AND lease_expires_at <= now()) OR (state = %d AND record_expires_at <= now()))`,
 		stateReserved, stateCompleted)
+	// Same predicate, but column references qualified with the table
+	// name: inside ON CONFLICT DO UPDATE ... WHERE, bare column names are
+	// ambiguous between the existing row and EXCLUDED (the proposed row).
+	expiredExisting := fmt.Sprintf(`((%s.state = %d AND %s.lease_expires_at <= now()) OR (%s.state = %d AND %s.record_expires_at <= now()))`,
+		t, stateReserved, t, t, stateCompleted, t)
 	leaseMs := `(extract(epoch from (lease_expires_at - now())) * 1000)::bigint`
 	recordMs := `CASE WHEN record_expires_at IS NULL THEN NULL ELSE (extract(epoch from (record_expires_at - now())) * 1000)::bigint END`
 
@@ -114,20 +119,20 @@ func New(db *sql.DB, opts ...Option) *Store {
 	// the existing record separately.
 	s.qReserve = fmt.Sprintf(`
 INSERT INTO %s (key, state, token, fingerprint, lease_expires_at, record_expires_at, payload, created_at)
-VALUES ($1, %d, $2, $3, now() + interval '1 millisecond' * $4, NULL, NULL, now())
+VALUES ($1, %d, $2, $3, now() + interval '1 millisecond' * $4::double precision, NULL, NULL, now())
 ON CONFLICT (key) DO UPDATE
   SET state = %d, token = EXCLUDED.token, fingerprint = EXCLUDED.fingerprint,
       lease_expires_at = EXCLUDED.lease_expires_at, record_expires_at = NULL,
       payload = NULL, created_at = now()
   WHERE %s
-RETURNING %s`, t, stateReserved, stateReserved, expired, leaseMs)
+RETURNING %s`, t, stateReserved, stateReserved, expiredExisting, leaseMs)
 
 	s.qReserveExists = fmt.Sprintf(`
 SELECT state, token, fingerprint, payload, %s, %s
 FROM %s WHERE key = $1 AND %s`, leaseMs, recordMs, t, live)
 
 	s.qComplete = fmt.Sprintf(`
-UPDATE %s SET state = %d, payload = $3, record_expires_at = now() + interval '1 millisecond' * $4
+UPDATE %s SET state = %d, payload = $3, record_expires_at = now() + interval '1 millisecond' * $4::double precision
 WHERE key = $1 AND token = $2 AND state = %d AND lease_expires_at > now()`,
 		t, stateCompleted, stateReserved)
 
