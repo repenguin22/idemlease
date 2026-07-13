@@ -260,6 +260,18 @@ success/failure matrix and its acceptance tests live in
   ```
 
 - **fasthttp / Fiber** — not supported.
+- **gRPC** — a unary server interceptor ships as
+  `github.com/repenguin22/idemlease/grpcidem`, sharing the same core and
+  stores (no net/http). The key comes from `idempotency-key` metadata,
+  the fingerprint from the marshaled request, and the response type is
+  recovered from the proto registry on replay. Only successful responses
+  are replayed; errored calls re-execute:
+
+  ```go
+  srv := grpc.NewServer(grpc.UnaryInterceptor(
+      grpcidem.UnaryServerInterceptor(store, grpcidem.Require(true)),
+  ))
+  ```
 
 Per-route enforcement: `Require` is global by design; to protect only
 some routes, apply the middleware to those routes or groups.

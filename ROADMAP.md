@@ -230,8 +230,11 @@
 
 ### M13 — gRPC interceptor（別 go.mod）
 
-- metadata キー名の定義から着手（§9.4）。unary interceptor: metadata → キー、リクエストメッセージのバイト列 → 指紋、レスポンスメッセージ → ペイロード
-- Exit: コア/Store を完全共有した E2E テスト
+**状態: ✅ 完了（2026-07-14）** — `grpcidem/`（別 go.mod、grpc + protobuf 依存、**net/http 非依存**でコアのみ共有）。`UnaryServerInterceptor(store, opts...)`。metadata `idempotency-key` からキー、`SHA-256(fullMethod + "\n" + reqBytes)` で指紋、レスポンスは proto full name + バイト列でエンコードし**リプレイ時に protoregistry から型を復元**（メソッド単位の登録不要）。リプレイマーカーは response header metadata `idempotency-replayed: true`。
+
+- metadata キー名（`MetadataKey` / `ReplayedMetadataKey`）、unary interceptor、`KeyScope`/`Policy`/`Require`/`FailOpen`（§9.4）✅
+- **gRPC 固有セマンティクス**: エラーはステータスコードでありレスポンス本体がないため、**成功レスポンスのみ保存・リプレイ、エラーは常に再実行**。in-flight→Aborted、指紋不一致→FailedPrecondition、キー不正/欠落→InvalidArgument、ストア障害→Unavailable
+- Exit: bufconn による実 gRPC サーバ E2E（wrapperspb で手書き ServiceDesc）でリプレイ/409/422/KeyScope/エラー再実行/panic/FailOpen を検証 ✅
 
 ### リリース
 
