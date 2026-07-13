@@ -264,6 +264,22 @@ success/failure matrix and its acceptance tests live in
 Per-route enforcement: `Require` is global by design; to protect only
 some routes, apply the middleware to those routes or groups.
 
+## Error-library integration
+
+Rejections and replay decisions are pluggable via
+`httpidem.Errors(ErrorWriter)` and `httpidem.Policy(ReplayPolicy)`. The
+[errtrail](https://github.com/repenguin22/errtrail) integration ships as
+`github.com/repenguin22/idemlease/errtrailadapter`:
+
+```go
+mw := httpidem.New(store, errtrailadapter.Options()...) // errtrail problem+json + Code-driven replay
+```
+
+It maps the rejection sentinels to errtrail codes (RFC 9457 responses)
+and lets a handler steer replay by reporting an errtrail `Code` through
+`httpidem.SetError` — retryable codes discard so the retry re-executes.
+See [errtrailadapter/](errtrailadapter).
+
 ## Performance
 
 Measured on Apple M1 Pro against `memstore`, `httptest` plumbing

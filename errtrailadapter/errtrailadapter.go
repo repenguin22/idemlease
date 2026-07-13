@@ -1,7 +1,25 @@
-// Package errtrailadapter is the §9.1 / §12-8 verification prototype:
-// it proves that an errtrail integration can be assembled from
-// httpidem's public interfaces alone. It is not part of the v1 API
-// surface; the production adapter will ship as its own module after v1.
+// Package errtrailadapter integrates idemlease's httpidem middleware
+// with the errtrail error library (REQUIREMENTS §9.1).
+//
+// It provides two plugins for httpidem.New (and the equivalent
+// ginadapter options), assembled entirely from httpidem's public
+// interfaces:
+//
+//   - Errors returns an httpidem.ErrorWriter that maps the middleware's
+//     rejection sentinels to errtrail codes and responds with
+//     problem.Write (RFC 9457).
+//   - Policy returns an httpidem.ReplayPolicy that decides persist vs.
+//     discard from the errtrail Code a handler reports via
+//     httpidem.SetError, falling back to the status-driven default for
+//     responses without an errtrail classification.
+//
+// Wire both at once with Options:
+//
+//	mw := httpidem.New(store, errtrailadapter.Options()...)
+//
+// The package registers errtrail codes 1100-1104 (names
+// IDEMPOTENCY_*) from an init function; do not register those codes or
+// names elsewhere.
 package errtrailadapter
 
 import (
@@ -14,8 +32,12 @@ import (
 	"github.com/repenguin22/idemlease/httpidem"
 )
 
-// Custom errtrail codes for idempotency rejections (>= 100 per the
-// errtrail registry contract; 1100 block picked for this prototype).
+// Custom errtrail codes for idempotency rejections. errtrail requires
+// custom codes to be >= 100 and uniquely named; this package reserves
+// the 1100-1104 block and the IDEMPOTENCY_* names. Each is registered
+// with the same HTTP status the middleware assigns the corresponding
+// sentinel, so problem.Write (which derives status from the code)
+// reproduces it exactly.
 const (
 	CodeKeyMissing      errtrail.Code = 1100
 	CodeKeyInvalid      errtrail.Code = 1101
@@ -37,8 +59,24 @@ func init() {
 		http.StatusRequestEntityTooLarge, errtrail.ResourceExhausted.GRPCCode())
 }
 
+// Options bundles Errors and Policy as httpidem options, the usual way
+// to enable the adapter:
+//
+//	mw := httpidem.New(store, errtrailadapter.Options()...)
+//
+// Append your own options as needed; later options win, so place any
+// override after Options()....
+func Options() []httpidem.Option {
+	return []httpidem.Option{
+		httpidem.Errors(Errors()),
+		httpidem.Policy(Policy()),
+	}
+}
+
 // Errors returns an httpidem.ErrorWriter that classifies the middleware
-// sentinels into errtrail codes and responds with problem.Write.
+// sentinels into errtrail codes and responds with problem.Write. Its
+// public messages are safe to expose to clients; internal detail stays
+// server-side (errtrail's public/internal separation).
 func Errors() httpidem.ErrorWriter { return errorWriter{} }
 
 type errorWriter struct{}
@@ -47,9 +85,9 @@ func (errorWriter) WriteError(w http.ResponseWriter, r *http.Request, status int
 	_ = problem.Write(w, classify(status, err))
 }
 
-// classify maps the httpidem sentinels onto the errtrail taxonomy. The
-// registered HTTP statuses mirror the statuses the middleware passes
-// in, so problem.Write reproduces them.
+// classify maps an httpidem rejection to an errtrail error. The
+// registered HTTP status of each code matches the status the middleware
+// passes in, so problem.Write reproduces the intended status.
 func classify(status int, err error) error {
 	switch {
 	case errors.Is(err, httpidem.ErrKeyMissing):
@@ -71,20 +109,27 @@ func classify(status int, err error) error {
 		return errtrail.New(errtrail.Unavailable, "idempotency store unavailable").
 			WithPublic("The service is temporarily unavailable. Retry later.")
 	default:
-		// Not one of the middleware sentinels: fall back by status.
+		// Not a middleware sentinel (e.g. a corrupted stored payload,
+		// reported as 500): keep the intended status via the code that
+		// maps to it, and don't leak internal detail.
 		code := errtrail.Unknown
 		if status >= 400 && status < 500 {
 			code = errtrail.InvalidArgument
 		}
-		return errtrail.Wrapf(errtrail.New(code, "idempotency rejection"), "%v", err)
+		e := errtrail.New(code, "idempotency rejection")
+		if err != nil {
+			return errtrail.Wrap(e, err.Error())
+		}
+		return e
 	}
 }
 
-// Policy returns a ReplayPolicy driven by the errtrail Code the handler
-// reported via httpidem.SetError: retryable codes (per the errtrail
-// registry — the decision table) are discarded so a retry re-executes,
-// everything else is persisted and replayed. Responses without an
-// errtrail classification fall back to the status-driven default.
+// Policy returns an httpidem.ReplayPolicy driven by the errtrail Code
+// the handler reported via httpidem.SetError: retryable codes (per the
+// errtrail registry — the decision table) are discarded so a retry
+// re-executes, everything else is persisted and replayed. Responses
+// without an errtrail classification fall back to the status-driven
+// default (httpidem.DefaultPolicy).
 func Policy() httpidem.ReplayPolicy {
 	return httpidem.ReplayPolicyFunc(func(status int, err error) idemlease.Decision {
 		if err == nil {
@@ -92,7 +137,6 @@ func Policy() httpidem.ReplayPolicy {
 		}
 		code := errtrail.CodeOf(err)
 		if code == errtrail.Unknown {
-			// No errtrail classification in the chain: status-driven.
 			return httpidem.DefaultPolicy.Decide(status, err)
 		}
 		if code.Retryable() {

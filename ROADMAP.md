@@ -205,8 +205,10 @@
 
 ### M10 — errtrailadapter 本実装（別 go.mod）
 
-- docs/prototypes/errtrailadapter を昇格: カスタムコード体系の確定、godoc、テスト拡充
-- Exit: プロトタイプは削除し、CI カナリアは本実装を指す
+**状態: ✅ 完了（2026-07-14）** — `errtrailadapter/`（別 go.mod、errtrail v1.3.2 依存）。`Errors()`（sentinel→カスタムコード 1100-1104→problem.Write）+ `Policy()`（CodeOf/Retryable + ステータス駆動フォールバック）+ `Options()`（両者をまとめて httpidem に渡す便利関数）。プロトタイプ（docs/prototypes/errtrailadapter）は削除、CI ジョブは本実装を指す。
+
+- カスタムコード体系の確定（1100-1104 / IDEMPOTENCY_*）、godoc、テスト拡充（503 マッピングの detail 非漏洩、コード↔ステータス整合の不変条件、Options 便利関数）✅
+- Exit: プロトタイプ削除 + CI が本実装を検証 ✅
 
 ### M11 — pgstore（Store 実装）
 

@@ -199,20 +199,32 @@ jobs:
       - name: go test
         run: go test -race ./...
 
-  # §12-8 カナリア: errtrail アダプタが httpidem の公開 API のみで
-  # 実装可能であり続けることを機械的に担保する
-  errtrailadapter-prototype:
-    name: errtrailadapter prototype (canary)
+  # errtrail アダプタ本実装。httpidem の公開 API のみで構成されることを
+  # 機械的に担保するカナリアも兼ねる（§12-8 / §9.1）
+  errtrailadapter:
+    name: errtrailadapter (go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22.x", "stable"]
     defaults:
       run:
-        working-directory: docs/prototypes/errtrailadapter
+        working-directory: errtrailadapter
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version: ${{ matrix.go }}
           cache: false
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt differs:"
+            echo "$out"
+            exit 1
+          fi
       - name: go vet
         run: go vet ./...
       - name: go test
