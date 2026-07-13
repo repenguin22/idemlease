@@ -101,7 +101,7 @@ httpidem.KeyScope(func(r *http.Request) string {
 
 - **net/http・chi・gorilla/mux** — `func(http.Handler) http.Handler` なのでそのまま使用可
 - **Echo** — `e.Use(echo.WrapMiddleware(mw))`。二重ラップでの捕捉・Flush 検知を [e2e/echoe2e](../e2e/echoe2e) で E2E 検証済み
-- **Gin** — 専用アダプタを計画中（エクスポート部品 + コア `Begin`/`Finish` で構成）
+- **Gin** — 専用アダプタ（モジュール `github.com/repenguin22/idemlease/ginadapter`）。エクスポート部品 + コア `Begin`/`Finish` で構成され、gin の遅延ヘッダ書き込みにも対応: `r.Use(ginadapter.New(store, ginadapter.Require(true)))`
 - **fasthttp / Fiber** — 非対応
 
 ルート単位の適用: `Require` はグローバル設定。特定ルートのみ保護したい場合はミドルウェアをそのルート/グループに適用する。

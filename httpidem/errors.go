@@ -36,6 +36,11 @@ type ErrorWriter interface {
 	WriteError(w http.ResponseWriter, r *http.Request, status int, err error)
 }
 
+// DefaultErrorWriter is the default ErrorWriter: a minimal RFC 9457
+// problem document. Adapters can reuse it to match the middleware's
+// rejection format.
+var DefaultErrorWriter ErrorWriter = problemWriter{}
+
 // problemWriter is the default ErrorWriter: a minimal RFC 9457 problem
 // document built with the standard library only.
 type problemWriter struct{}

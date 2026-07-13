@@ -211,11 +211,16 @@ library only.
 - **Echo** — wrap it: `e.Use(echo.WrapMiddleware(mw))`. Verified end to
   end (capture and Flush detection through Echo's response wrapper) in
   [e2e/echoe2e](e2e/echoe2e).
-- **Gin** — planned as a dedicated adapter built from the exported
-  parts (`ParseKey`, `Fingerprint`, `Recorder`, `StoredResponse`) plus
-  the core `Begin`/`Finish`. See
-  [docs/prototypes/errtrailadapter](docs/prototypes/errtrailadapter)
-  for proof that adapters need no internal APIs.
+- **Gin** — dedicated adapter (module
+  `github.com/repenguin22/idemlease/ginadapter`), assembled from the
+  exported parts plus the core `Begin`/`Finish` and aware of Gin's
+  deferred header writes:
+
+  ```go
+  r := gin.New()
+  r.Use(ginadapter.New(store, ginadapter.Require(true)))
+  ```
+
 - **fasthttp / Fiber** — not supported.
 
 Per-route enforcement: `Require` is global by design; to protect only

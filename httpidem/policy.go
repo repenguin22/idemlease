@@ -52,11 +52,21 @@ func defaultDecide(status int, _ error) idemlease.Decision {
 // SetError notifies the ReplayPolicy of the error behind the response
 // being written. Call it from a handler running under the middleware;
 // the value is handed to ReplayPolicy.Decide untouched. Outside the
-// middleware it is a no-op.
+// middleware (or an adapter that installed ErrorChannel) it is a no-op.
 func SetError(ctx context.Context, err error) {
 	if box, ok := ctx.Value(errBoxKey{}).(*errBox); ok {
 		box.set(err)
 	}
+}
+
+// ErrorChannel returns a derived context under which SetError stores
+// the handler's error, and a function that reads it back afterwards.
+// The middleware installs this automatically; framework adapters (Gin,
+// gRPC, ...) call it before invoking their handlers and pass the read
+// error to ReplayPolicy.Decide (§6.2).
+func ErrorChannel(ctx context.Context) (context.Context, func() error) {
+	box := &errBox{}
+	return context.WithValue(ctx, errBoxKey{}, box), box.get
 }
 
 type errBoxKey struct{}

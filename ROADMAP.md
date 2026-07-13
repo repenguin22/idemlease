@@ -191,16 +191,17 @@
 
 ### M8 — トランザクション合流の設計（成功/失敗マトリクス）
 
-**状態: 🔍 レビュー待ち（2026-07-13 ドラフト完成）**
+**状態: ✅ 確定（2026-07-13 契約者レビュー承認）** — M11/M12 のゲート解除。未決 6 点は提案どおり採用。
 
 - 成果物: [docs/design/pgstore-txjoin.md](docs/design/pgstore-txjoin.md) — 強化される保証の言明、スキーマ、API 案（`CompleteTx` + httpidem 連携プロトコル）、**成功/失敗マトリクス T1〜T10（各行に受け入れ条件）**
-- **Exit criteria: 契約者（ユーザー）のレビューで確定**（§9.3「実装前に完成させること」のゲート）
 
 ### M9 — ginadapter（別 go.mod・優先度高）
 
+**状態: ✅ 完了（2026-07-13）** — `ginadapter/`（in-repo サブモジュール、gin v1.10）。gin の遅延ヘッダ書き込みに合わせ、捕捉スナップショットは最初の body 書き込み時（`WriteHeaderNow` 含む）。httpidem に `ErrorChannel` / `DefaultErrorWriter` を追加エクスポート（SetError 連携と拒否応答形式をアダプタから再利用可能に）。
+
 - コア Begin/Finish + httpidem 公開部品（`KeyFromHeader` / `Fingerprint` / `Recorder` / `StoredResponse`）のみで構成（§9.2、§6.2）
-- gin.ResponseWriter 版の薄い皮 + E2E テスト（リプレイ/409/422/Flush 検知）
-- Exit: 内部 API 依存ゼロ（errtrailadapter カナリアと同方式で CI 検証）
+- gin.ResponseWriter 版の薄い皮 + E2E テスト（リプレイ/409/422/KeyScope/SetError/Flush 検知/panic/障害 2 局面）
+- Exit: 内部 API 依存ゼロ（外部モジュールとして公開 API のみでビルド = CI で検証）✅
 
 ### M10 — errtrailadapter 本実装（別 go.mod）
 
@@ -240,4 +241,5 @@
 | モジュールパス | 決定（2026-07-12） | `github.com/repenguin22/idemlease` |
 | Go 最低バージョン | 決定（2026-07-12） | **1.22**（go directive）。契約 §10 の下限（`log/slog` = 1.21）を満たす。CI は 1.22.x と stable の 2 系でテスト |
 | テストヘルパー依存 | 決定（2026-07-12） | `_test.go` では go-cmp / testify 等を使用可（go-cmp v0.7.0 導入済み）。本体と公開適合性パッケージは stdlib のみを維持し、CI でビルド依存の stdlib-only を機械検証 |
+| アダプタ配置（契約 決定 1 の保留分） | 決定（2026-07-13） | 本リポジトリ内のサブモジュール（redistore と同方式: `require` 実バージョン + 開発用 `replace`）。ginadapter / errtrailadapter / grpc いずれも |
 | 公開 README の言語 | 決定（2026-07-13） | 英語を正とし、日本語版を docs/README.ja.md に併置 |

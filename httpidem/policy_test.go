@@ -45,3 +45,16 @@ func TestDefaultPolicy(t *testing.T) {
 func TestSetErrorWithoutMiddleware(t *testing.T) {
 	httpidem.SetError(context.Background(), errors.New("ignored"))
 }
+
+// TestErrorChannel pins the adapter-facing SetError plumbing (§6.2).
+func TestErrorChannel(t *testing.T) {
+	ctx, handlerErr := httpidem.ErrorChannel(context.Background())
+	if got := handlerErr(); got != nil {
+		t.Fatalf("handlerErr() = %v before SetError, want nil", got)
+	}
+	want := errors.New("business failure")
+	httpidem.SetError(ctx, want)
+	if got := handlerErr(); !errors.Is(got, want) {
+		t.Fatalf("handlerErr() = %v, want the SetError value", got)
+	}
+}

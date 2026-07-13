@@ -167,7 +167,7 @@ func New(store idemlease.Store, opts ...Option) func(http.Handler) http.Handler 
 		maxRequestBody:  DefaultMaxRequestBody,
 		maxResponseBody: DefaultMaxResponseBody,
 		policy:          DefaultPolicy,
-		errorWriter:     problemWriter{},
+		errorWriter:     DefaultErrorWriter,
 		methods:         map[string]bool{http.MethodPost: true, http.MethodPatch: true},
 		storeHeaders:    []string{"Content-Type", "Content-Language", "Content-Encoding", "Content-Disposition", "Location"},
 		logger:          slog.Default(),
@@ -273,8 +273,7 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Proceed: run the handler under capture, then Finish.
 	rec := NewRecorder(cfg.maxResponseBody, cfg.storeHeaders)
 	cw := &captureWriter{ResponseWriter: w, rec: rec}
-	box := &errBox{}
-	ctx := context.WithValue(r.Context(), errBoxKey{}, box)
+	ctx, handlerErr := ErrorChannel(r.Context())
 	// Finish must reach the store even when the client disconnects
 	// mid-request: the work happened, so the record must reflect it.
 	finishCtx := context.WithoutCancel(ctx)
@@ -293,7 +292,7 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.next.ServeHTTP(cw, r.WithContext(ctx))
 	cw.finalize()
 
-	decision := cfg.policy.Decide(rec.Status(), box.get())
+	decision := cfg.policy.Decide(rec.Status(), handlerErr())
 	if decision == idemlease.Persist {
 		switch {
 		case rec.Abandoned():
