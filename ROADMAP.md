@@ -185,15 +185,52 @@
 | 13 | ミドルウェアが Begin/Finish + 公開部品のみで構成 | M3 |
 | 14 | コア状態遷移テーブルの網羅テスト | M1 |
 
-## v1.0 以降（v1.1+）
+## v1.1 マイルストーン
 
-契約 §9・§11 決定 5 より:
+契約 §9・§11 決定 5 より。依存関係: `M8 → { M11 → M12 } | M9 | M10 | M13`（M9/M10/M13 は M8 と並行可。M11/M12 のみ M8 のマトリクス確定がゲート）。
 
-- **v1.1 — pgstore + トランザクション合流**: `CompleteTx(ctx, tx *sql.Tx, …)` 相当を提供。**着手条件: 成功/失敗マトリクスを受け入れ条件付きで完成させてから実装**（§9.3）。`TxStore` / `CompleteTx` 型は v1 コアには置かない
-- **ginadapter**（別 go.mod・優先度高）: コア Begin/Finish + httpidem 公開部品（キーパース・指紋・Recorder・シリアライズ）で構成（§9.2）
-- **errtrailadapter 本実装**: sentinel → errtrail カスタムコードのマッピング ErrorWriter、`SetError` 通知のテーブル駆動 ReplayPolicy（§9.1）
-- **gRPC interceptor**（別 go.mod）: metadata キー名の定義から着手。Store と状態機械はコアを完全共有（§9.4）
-- その他: ペイロード圧縮、ORM 向けトランザクション合流アダプタ（§9.5）
+### M8 — トランザクション合流の設計（成功/失敗マトリクス）
+
+**状態: 🔍 レビュー待ち（2026-07-13 ドラフト完成）**
+
+- 成果物: [docs/design/pgstore-txjoin.md](docs/design/pgstore-txjoin.md) — 強化される保証の言明、スキーマ、API 案（`CompleteTx` + httpidem 連携プロトコル）、**成功/失敗マトリクス T1〜T10（各行に受け入れ条件）**
+- **Exit criteria: 契約者（ユーザー）のレビューで確定**（§9.3「実装前に完成させること」のゲート）
+
+### M9 — ginadapter（別 go.mod・優先度高）
+
+- コア Begin/Finish + httpidem 公開部品（`KeyFromHeader` / `Fingerprint` / `Recorder` / `StoredResponse`）のみで構成（§9.2、§6.2）
+- gin.ResponseWriter 版の薄い皮 + E2E テスト（リプレイ/409/422/Flush 検知）
+- Exit: 内部 API 依存ゼロ（errtrailadapter カナリアと同方式で CI 検証）
+
+### M10 — errtrailadapter 本実装（別 go.mod）
+
+- docs/prototypes/errtrailadapter を昇格: カスタムコード体系の確定、godoc、テスト拡充
+- Exit: プロトタイプは削除し、CI カナリアは本実装を指す
+
+### M11 — pgstore（Store 実装）
+
+- PostgreSQL 実装: Reserve = 単文 upsert（`INSERT ... ON CONFLICT ... WHERE 期限切れ`）、Complete/Release = token CAS `UPDATE`/`DELETE`
+- **期限権威は DB クロック**（`now()` 基準。v1.0.1 レビュー M1 の教訓: 期限は「残余時間」で返しローカル時計で再構成）
+- 期限切れ行の物理削除ヘルパー（`Sweep`）
+- CI: postgres コンテナで適合性 3 スイート全件
+- Exit: §12-7 相当（idemleasetest / httpidemtest 全件）
+
+### M12 — CompleteTx + httpidem 連携（マトリクス実装）
+
+- `pgstore.CompleteTx`（呼び出し側 tx 内で reserved→completed CAS）、`httpidem.Reservation(ctx)` / `WriteStored` / `MarkFinished`
+- **M8 のマトリクス T1〜T10 の受け入れ条件を全件テスト化**（並行二重コミット防止 T9 を含む）
+- Exit: マトリクス全行 green + README に強化された保証の言明を追記
+
+### M13 — gRPC interceptor（別 go.mod）
+
+- metadata キー名の定義から着手（§9.4）。unary interceptor: metadata → キー、リクエストメッセージのバイト列 → 指紋、レスポンスメッセージ → ペイロード
+- Exit: コア/Store を完全共有した E2E テスト
+
+### リリース
+
+- v1.1.0（ルート）+ 各モジュールタグ（pgstore/v1.1.0 等）。redistore は必要時のみ追随
+
+その他（v1.2+ 候補）: ペイロード圧縮、ORM 向けトランザクション合流アダプタ（§9.5）
 
 ## 決定・未決事項
 
