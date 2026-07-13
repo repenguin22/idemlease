@@ -16,9 +16,9 @@ CompleteTx はこの窓を閉じる。業務書き込みと reserved→completed
 ## 2. 前提とスキーマ
 
 ```sql
--- pgstore.Schema() が返す DDL（利用者が migration に組み込む）
+-- pgstore.Schema(table) が返す DDL（利用者が migration に組み込む）
 CREATE TABLE IF NOT EXISTS idemlease_records (
-    key               text        PRIMARY KEY,
+    key               bytea       PRIMARY KEY,         -- 不透明バイト列（KeyScope が NUL を含めるため text 不可）
     state             smallint    NOT NULL,            -- 1 = reserved, 2 = completed
     token             text        NOT NULL,
     fingerprint       bytea       NOT NULL DEFAULT ''::bytea,

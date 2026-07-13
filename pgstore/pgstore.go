@@ -46,8 +46,11 @@ var identifierRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-
 // pgstore.DefaultTable unless you configured a custom name with Table.
 func Schema(table string) string {
 	mustValidIdentifier(table)
+	// key is bytea, not text: idempotency keys are opaque byte strings
+	// and KeyScope composes them with a NUL separator, which a text
+	// column cannot store.
 	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-    key               text        PRIMARY KEY,
+    key               bytea       PRIMARY KEY,
     state             smallint    NOT NULL,
     token             text        NOT NULL,
     fingerprint       bytea       NOT NULL DEFAULT ''::bytea,
@@ -179,9 +182,10 @@ func (s *Store) Reserve(ctx context.Context, rec idemlease.Record) (*idemlease.R
 	}
 	// The claim is a single atomic statement; the rare "lost, then the
 	// blocking row vanished" race (a concurrent Release) is retried.
+	keyBytes := []byte(rec.Key)
 	for attempt := 0; attempt < 3; attempt++ {
 		var leaseMs int64
-		err := s.db.QueryRowContext(ctx, s.qReserve, rec.Key, rec.Token, fp, leaseTTLMillis(rec)).Scan(&leaseMs)
+		err := s.db.QueryRowContext(ctx, s.qReserve, keyBytes, rec.Token, fp, leaseTTLMillis(rec)).Scan(&leaseMs)
 		if err == nil {
 			return nil, nil // claimed
 		}
@@ -189,7 +193,7 @@ func (s *Store) Reserve(ctx context.Context, rec idemlease.Record) (*idemlease.R
 			return nil, fmt.Errorf("pgstore: reserve: %w", err)
 		}
 		// Lost the claim: a live record blocks us. Read it.
-		existing, err := s.scanRecord(s.db.QueryRowContext(ctx, s.qReserveExists, rec.Key), rec.Key)
+		existing, err := s.scanRecord(s.db.QueryRowContext(ctx, s.qReserveExists, keyBytes), rec.Key)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue // the blocking row expired/was released; retry
@@ -203,7 +207,7 @@ func (s *Store) Reserve(ctx context.Context, rec idemlease.Record) (*idemlease.R
 
 // Complete implements idemlease.Store.
 func (s *Store) Complete(ctx context.Context, key, token string, payload []byte, recordTTL time.Duration) error {
-	res, err := s.db.ExecContext(ctx, s.qComplete, key, token, payload, recordTTLMillis(recordTTL))
+	res, err := s.db.ExecContext(ctx, s.qComplete, []byte(key), token, payload, recordTTLMillis(recordTTL))
 	if err != nil {
 		return fmt.Errorf("pgstore: complete: %w", err)
 	}
@@ -215,7 +219,7 @@ func (s *Store) Complete(ctx context.Context, key, token string, payload []byte,
 
 // Release implements idemlease.Store.
 func (s *Store) Release(ctx context.Context, key, token string) error {
-	res, err := s.db.ExecContext(ctx, s.qRelease, key, token)
+	res, err := s.db.ExecContext(ctx, s.qRelease, []byte(key), token)
 	if err != nil {
 		return fmt.Errorf("pgstore: release: %w", err)
 	}
@@ -231,7 +235,7 @@ func (s *Store) Release(ctx context.Context, key, token string) error {
 // Either sentinel is contract-valid for records lost to expiry (§3.2).
 func (s *Store) classifyFailure(ctx context.Context, key, token, op string) error {
 	var current string
-	err := s.db.QueryRowContext(ctx, s.qClassify, key).Scan(&current)
+	err := s.db.QueryRowContext(ctx, s.qClassify, []byte(key)).Scan(&current)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return idemlease.ErrNotFound
@@ -247,7 +251,7 @@ func (s *Store) classifyFailure(ctx context.Context, key, token, op string) erro
 // Get implements idemlease.Store. Expired records are reported as
 // (nil, nil).
 func (s *Store) Get(ctx context.Context, key string) (*idemlease.Record, error) {
-	rec, err := s.scanRecord(s.db.QueryRowContext(ctx, s.qGet, key), key)
+	rec, err := s.scanRecord(s.db.QueryRowContext(ctx, s.qGet, []byte(key)), key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

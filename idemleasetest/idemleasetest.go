@@ -218,6 +218,30 @@ func RunStoreTests(t *testing.T, newStore func(t *testing.T) idemlease.Store) {
 		}
 	})
 
+	t.Run("OpaqueBinaryKey", func(t *testing.T) {
+		st := newStore(t)
+		// Keys are opaque byte strings: KeyScope composes them as
+		// scope + "\x00" + key, so a store must handle embedded NUL and
+		// other non-text bytes (a text-typed SQL column would reject NUL).
+		key := "tenant-A\x00order-\xff\x01key"
+		mustReserveNew(t, st, reservedRecord(key, "tok-bin", []byte("fp"), validTTL))
+
+		got, err := st.Get(ctx, key)
+		if err != nil || got == nil {
+			t.Fatalf("Get(%q) = (%+v, %v), want the reserved record", key, got, err)
+		}
+		if got.Token != "tok-bin" {
+			t.Errorf("Token = %q, want %q", got.Token, "tok-bin")
+		}
+		if err := st.Complete(ctx, key, "tok-bin", []byte("payload"), validTTL); err != nil {
+			t.Fatalf("Complete on a binary key: %v", err)
+		}
+		got, err = st.Get(ctx, key)
+		if err != nil || got == nil || got.State != idemlease.StateCompleted {
+			t.Fatalf("Get after Complete = (%+v, %v), want a completed record", got, err)
+		}
+	})
+
 	t.Run("TokenPersistedVerbatim", func(t *testing.T) {
 		st := newStore(t)
 		token := "tok-α/β+γ=0123456789abcdef" // stores must not normalize or re-encode
