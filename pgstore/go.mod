@@ -4,7 +4,7 @@ go 1.22
 
 require (
 	github.com/jackc/pgx/v5 v5.7.2
-	github.com/repenguin22/idemlease v1.0.1
+	github.com/repenguin22/idemlease v1.1.0
 )
 
 require (

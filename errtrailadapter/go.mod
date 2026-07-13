@@ -4,7 +4,7 @@ go 1.22
 
 require (
 	github.com/repenguin22/errtrail v1.3.2
-	github.com/repenguin22/idemlease v1.0.1
+	github.com/repenguin22/idemlease v1.1.0
 )
 
 replace github.com/repenguin22/idemlease => ../
