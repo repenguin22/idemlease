@@ -463,8 +463,11 @@ func TestTxJoin_T8_DoubleCompleteTx(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if got := string(storedBody(t, store, "k")); got == "" {
-		t.Fatal("record must be completed after commit")
+	// The payload here is a raw marker ("p"), not a StoredResponse, so
+	// read the record directly rather than decoding it.
+	rec, err := store.Get(ctx, "k")
+	if err != nil || rec == nil || rec.State != idemlease.StateCompleted || string(rec.Payload) != "p" {
+		t.Fatalf("Get after commit = (%+v, %v), want a completed record with payload \"p\"", rec, err)
 	}
 	if n := orderCount(t, db, orders); n != 1 {
 		t.Fatalf("orders = %d, want 1", n)
