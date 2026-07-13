@@ -758,6 +758,100 @@ func TestReplayRefusesOversizedPayload(t *testing.T) {
 	}
 }
 
+// TestHandlerFinishedItself pins the transactional-join handshake
+// (§9.3, design matrix T1 at the middleware level): a handler that
+// completes the record itself and calls MarkFinished must not trigger
+// the middleware's own Finish, and the handler-stored payload is what
+// replays.
+func TestHandlerFinishedItself(t *testing.T) {
+	store := memstore.New()
+	var count atomic.Int32
+	var logBuf bytes.Buffer
+	sr := httpidem.StoredResponse{
+		StatusCode: http.StatusCreated,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       []byte(`{"joined":true}`),
+	}
+	h := httpidem.New(store, httpidem.Logger(slog.New(slog.NewTextHandler(&logBuf, nil))))(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			count.Add(1)
+			rsv, ok := httpidem.ReservationFromContext(r.Context())
+			if !ok {
+				t.Error("ReservationFromContext must succeed under the middleware")
+				return
+			}
+			payload, err := sr.MarshalBinary()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			// Stand-in for pgstore.CompleteTx + tx.Commit: complete the
+			// record directly, then hand off.
+			if err := store.Complete(r.Context(), rsv.Key, rsv.Token, payload, rsv.Options.RecordTTL); err != nil {
+				t.Errorf("Complete: %v", err)
+				return
+			}
+			httpidem.MarkFinished(r.Context())
+			_ = httpidem.WriteStored(w, sr)
+		}))
+
+	first := do(h, "POST", "/x", "k", "b")
+	if first.Code != http.StatusCreated || first.Body.String() != `{"joined":true}` {
+		t.Fatalf("first = (%d, %q), want the handler's stored response", first.Code, first.Body.String())
+	}
+	if strings.Contains(logBuf.String(), "lease_lost") {
+		t.Fatalf("MarkFinished must suppress the middleware Finish; log:\n%s", logBuf.String())
+	}
+
+	replay := do(h, "POST", "/x", "k", "b")
+	if replay.Header().Get(httpidem.HeaderIdempotencyReplayed) != "true" || replay.Body.String() != `{"joined":true}` {
+		t.Fatalf("replay = (%q, replayed=%q), want the handler-persisted response",
+			replay.Body.String(), replay.Header().Get(httpidem.HeaderIdempotencyReplayed))
+	}
+	if replay.Header().Get("Content-Type") != "application/json" || count.Load() != 1 {
+		t.Fatalf("replay Content-Type=%q handler=%d, want stored header and a single execution",
+			replay.Header().Get("Content-Type"), count.Load())
+	}
+}
+
+// TestMarkFinishedForgotten pins design matrix T7 at the middleware
+// level: a handler that completed the record but forgot MarkFinished
+// causes exactly one spurious lease_lost warning, and the record stays
+// intact and replayable.
+func TestMarkFinishedForgotten(t *testing.T) {
+	store := memstore.New()
+	var count atomic.Int32
+	var logBuf bytes.Buffer
+	sr := httpidem.StoredResponse{StatusCode: 201, Header: http.Header{}, Body: []byte("joined")}
+	h := httpidem.New(store, httpidem.Logger(slog.New(slog.NewTextHandler(&logBuf, nil))))(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			count.Add(1)
+			rsv, _ := httpidem.ReservationFromContext(r.Context())
+			payload, _ := sr.MarshalBinary()
+			_ = store.Complete(r.Context(), rsv.Key, rsv.Token, payload, rsv.Options.RecordTTL)
+			// MarkFinished forgotten (handler bug).
+			_ = httpidem.WriteStored(w, sr)
+		}))
+
+	do(h, "POST", "/x", "k", "b")
+	if !strings.Contains(logBuf.String(), "lease_lost") {
+		t.Fatalf("want the spurious lease_lost warning (T7), log:\n%s", logBuf.String())
+	}
+	replay := do(h, "POST", "/x", "k", "b")
+	if replay.Header().Get(httpidem.HeaderIdempotencyReplayed) != "true" || replay.Body.String() != "joined" || count.Load() != 1 {
+		t.Fatalf("the record must survive the forgotten MarkFinished (replayed=%q body=%q handler=%d)",
+			replay.Header().Get(httpidem.HeaderIdempotencyReplayed), replay.Body.String(), count.Load())
+	}
+}
+
+// TestReservationOutsideMiddleware pins the ok=false path.
+func TestReservationOutsideMiddleware(t *testing.T) {
+	if _, ok := httpidem.ReservationFromContext(context.Background()); ok {
+		t.Fatal("ReservationFromContext must report ok=false outside the middleware")
+	}
+	httpidem.MarkFinished(context.Background()) // must be a safe no-op
+}
+
 // TestSetCookieNeverReplayed is the §4.4 / §12-5 acceptance test: even
 // when explicitly allowlisted, Set-Cookie never appears in a replay.
 func TestSetCookieNeverReplayed(t *testing.T) {

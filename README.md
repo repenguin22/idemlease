@@ -13,8 +13,8 @@ The state machine at the core is dependency-free (stdlib only, no
 > execution holds a valid lease at any time**. Exactly-once execution is
 > *not* guaranteed: a handler may run more than once after a lease
 > expires, or when persisting the result fails and the request is
-> retried. Stronger coupling — atomically joining your business
-> transaction — is planned for v1.1 (`pgstore` + `CompleteTx`).
+> retried. For a stronger guarantee, `pgstore` can join your business
+> transaction atomically — see Transactional join below.
 
 The semantics follow the pattern proven in production by payment APIs
 (Stripe, Adyen, WorldPay): reserve on first sight, replay after
@@ -194,7 +194,7 @@ contain sensitive material.
 |---|---|---|
 | `memstore` | (this module) | Development and tests. **Single-process only** — instances behind a load balancer each see their own records, so the guarantee does not hold across them. |
 | `redistore` | `github.com/repenguin22/idemlease/redistore` | Production. Redis 6.0+ or compatible (Valkey is exercised in CI). Atomic Lua reserve/complete/release, cluster-safe. |
-| `pgstore` | planned (v1.1) | PostgreSQL + atomic join with your business transaction. |
+| `pgstore` | `github.com/repenguin22/idemlease/pgstore` | Production. PostgreSQL (database/sql, driver of your choice); DB-clock expiry authority, `Sweep` for expired-row GC, and optional transactional join via `CompleteTx` (below). |
 
 Implementing your own store is supported and encouraged: satisfy
 `idemlease.Store` (four methods) and validate with the shipped
@@ -203,6 +203,44 @@ conformance suites — `idemleasetest.RunStoreTests`,
 `httpidemtest.RunHTTPTests`. They pin atomicity, expiry, token CAS, and
 the full client-observable behavior. The suites depend on the standard
 library only.
+
+## Transactional join (pgstore)
+
+With the PostgreSQL store, a handler can complete the idempotency
+record *inside its own business transaction*, which upgrades the
+guarantee:
+
+> With `pgstore` + `CompleteTx`, **the business transaction for a given
+> key commits at most once while the completed record is valid**. Racing
+> executions serialize on the record's row lock; the loser's transaction
+> — business writes included — rolls back. Outside the guarantee remain
+> re-execution after the record TTL expires, and side effects that live
+> outside the database.
+
+```go
+rsv, _ := httpidem.ReservationFromContext(r.Context())
+tx, _ := db.BeginTx(ctx, nil)
+defer tx.Rollback()
+
+// ... business writes on tx ...
+
+sr := httpidem.StoredResponse{StatusCode: 201, Header: hdr, Body: body}
+payload, _ := sr.MarshalBinary()
+leaseLost, err := store.CompleteTx(ctx, tx, rsv.Key, rsv.Token, payload, rsv.Options.RecordTTL)
+if err != nil { /* 500 */ }
+if leaseLost { /* another execution owns the key: keep the rollback, answer 409 */ }
+if err := tx.Commit(); err != nil { /* 500 */ }
+
+httpidem.MarkFinished(r.Context()) // the middleware must not Finish again
+_ = httpidem.WriteStored(w, sr)    // respond with exactly what replays will serve
+```
+
+A crash after commit but before the response reaches the client is
+precisely the gap this closes: the retry replays the committed
+response. A rollback (or crash before commit) leaves the reservation to
+its lease — retries see 409 until it expires, then re-execute. The full
+success/failure matrix and its acceptance tests live in
+[docs/design/pgstore-txjoin.md](docs/design/pgstore-txjoin.md) (Japanese).
 
 ## Framework support
 

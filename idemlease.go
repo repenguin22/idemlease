@@ -68,6 +68,14 @@ type Options struct {
 	RecordTTL time.Duration
 }
 
+// Effective returns o with zero or negative TTLs replaced by the
+// package defaults — the concrete values Begin and Finish actually use.
+// Adapters expose it to code that needs real TTLs, such as
+// transactional completers (pgstore.CompleteTx).
+func (o Options) Effective() Options {
+	return Options{LeaseTTL: o.leaseTTL(), RecordTTL: o.recordTTL()}
+}
+
 func (o Options) leaseTTL() time.Duration {
 	if o.LeaseTTL > 0 {
 		return o.LeaseTTL

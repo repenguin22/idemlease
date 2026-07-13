@@ -93,9 +93,17 @@ httpidem.KeyScope(func(r *http.Request) string {
 |---|---|---|
 | `memstore` | （本モジュール） | 開発・テスト用。**単一プロセス限定** — ロードバランサ配下では保証が成立しない |
 | `redistore` | `github.com/repenguin22/idemlease/redistore` | 本番用。Redis 6.0+ / 互換実装（Valkey は CI で常時検証）。Lua による原子的 reserve/complete/release、クラスタ安全 |
-| `pgstore` | 予定（v1.1） | PostgreSQL + 業務トランザクションとの原子的合流 |
+| `pgstore` | `github.com/repenguin22/idemlease/pgstore` | 本番用。PostgreSQL（database/sql、ドライバは利用側）。期限権威は DB クロック、`Sweep` で期限切れ行 GC、`CompleteTx` によるトランザクション合流（下記） |
 
 自作ストアも歓迎: `idemlease.Store`（4 メソッド）を実装し、同梱の適合性スイート（`idemleasetest.RunStoreTests` / `RunStateMachineTests` / `httpidemtest.RunHTTPTests`、いずれも stdlib のみ）で検証できる。
+
+## トランザクション合流（pgstore）
+
+PostgreSQL ストアでは、ハンドラが**自分の業務トランザクションの中で**冪等レコードを completed に遷移できる（`CompleteTx`）。これにより保証が強化される:
+
+> `pgstore` + `CompleteTx` を使う場合、**同一キーの業務トランザクションのコミットは、completed レコードが有効な間、高々 1 回**。競合する実行はレコード行の行ロックで直列化され、敗者のトランザクションは業務書き込みごとロールバックされる。保証の外に残るのは、レコード TTL 失効後の再実行と、DB の外にある副作用のみ。
+
+使い方は `httpidem.ReservationFromContext` で key/token を取り、業務書き込みと同じ tx で `store.CompleteTx` → `tx.Commit()` → `httpidem.MarkFinished` → `httpidem.WriteStored`（英語版 README にコード例）。**commit 後・応答前のクラッシュ**こそこの機能が閉じる穴で、再送にはコミット済みレスポンスがリプレイされる。rollback（または commit 前のクラッシュ）は予約をリース失効に委ね、失効まで 409 → その後再実行。成功/失敗マトリクスと受け入れテストは [docs/design/pgstore-txjoin.md](design/pgstore-txjoin.md)。
 
 ## フレームワーク対応
 

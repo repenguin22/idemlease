@@ -220,9 +220,11 @@
 
 ### M12 — CompleteTx + httpidem 連携（マトリクス実装）
 
-- `pgstore.CompleteTx`（呼び出し側 tx 内で reserved→completed CAS）、`httpidem.Reservation(ctx)` / `WriteStored` / `MarkFinished`
-- **M8 のマトリクス T1〜T10 の受け入れ条件を全件テスト化**（並行二重コミット防止 T9 を含む）
-- Exit: マトリクス全行 green + README に強化された保証の言明を追記
+**状態: ✅ 完了（2026-07-14）** — `pgstore.CompleteTx`（DBTX、`ErrAlreadyCompleted` で二重呼び出しを区別）+ httpidem の連携部品（`Reservation` / `ContextWithReservation` / `ReservationFromContext` / `MarkFinished` / `FinishChannel` / `WriteStored`）。ミドルウェアと ginadapter は `finished()` で Finish をスキップ。リプレイはハンドラと同一の `WriteStored` 経路に統一。コアに `Options.Effective()` を追加（Reservation にデフォルト解決済み TTL を載せるため — ゼロ値をそのまま渡すと即失効レコードになる実バグをテストで検出して修正）
+
+- `pgstore.CompleteTx`（呼び出し側 tx 内で reserved→completed CAS）、`httpidem.Reservation(ctx)` / `WriteStored` / `MarkFinished` ✅
+- **M8 のマトリクス T1〜T10 の受け入れ条件を全件テスト化**（並行二重コミット防止 T3+T9 を含む、pgstore/txjoin_test.go）✅
+- Exit: マトリクス全行 green + README に強化された保証の言明を追記 ✅
 
 ### M13 — gRPC interceptor（別 go.mod）
 

@@ -241,14 +241,18 @@ func (a *adapter) handle(c *gin.Context) {
 	cw := &captureWriter{ResponseWriter: orig, rec: rec}
 	c.Writer = cw
 	ctx, handlerErr := httpidem.ErrorChannel(r.Context())
+	ctx = httpidem.ContextWithReservation(ctx, httpidem.Reservation{Key: storeKey, Token: out.Token, Options: o.Effective()})
+	ctx, finished := httpidem.FinishChannel(ctx)
 	c.Request = r.WithContext(ctx)
 	finishCtx := context.WithoutCancel(ctx)
 
 	defer func() {
 		if p := recover(); p != nil {
-			if _, ferr := idemlease.Finish(finishCtx, a.store, storeKey, out.Token, idemlease.Discard, nil, o); ferr != nil {
-				cfg.logger.Warn("ginadapter: releasing reservation after handler panic failed",
-					append(a.keyAttrs(scope, key), slog.Any("error", ferr))...)
+			if !finished() {
+				if _, ferr := idemlease.Finish(finishCtx, a.store, storeKey, out.Token, idemlease.Discard, nil, o); ferr != nil {
+					cfg.logger.Warn("ginadapter: releasing reservation after handler panic failed",
+						append(a.keyAttrs(scope, key), slog.Any("error", ferr))...)
+				}
 			}
 			panic(p)
 		}
@@ -256,6 +260,11 @@ func (a *adapter) handle(c *gin.Context) {
 	c.Next()
 	cw.finalize()
 	c.Writer = orig
+
+	if finished() {
+		// The handler finalized the record itself (transactional join).
+		return
+	}
 
 	decision := cfg.policy.Decide(rec.Status(), handlerErr())
 	if decision == idemlease.Persist {

@@ -67,6 +67,20 @@ func mustValidIdentifier(table string) {
 	}
 }
 
+// ErrAlreadyCompleted is returned by CompleteTx when the record was
+// already completed under the caller's own token — a double call within
+// the same transaction (a caller bug, design matrix T8). It is distinct
+// from lease loss so the caller does not roll back a healthy
+// transaction by mistake.
+var ErrAlreadyCompleted = errors.New("pgstore: record already completed with this token")
+
+// DBTX is the subset of *sql.DB / *sql.Tx that CompleteTx needs. Pass
+// the *sql.Tx that carries your business writes.
+type DBTX interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // Store is a PostgreSQL-backed idemlease.Store. It is safe for
 // concurrent use; atomicity is provided by PostgreSQL.
 type Store struct {
@@ -77,6 +91,7 @@ type Store struct {
 	qReserveExists string
 	qComplete      string
 	qClassify      string
+	qClassifyTx    string
 	qRelease       string
 	qGet           string
 	qSweep         string
@@ -143,6 +158,12 @@ WHERE key = $1 AND token = $2 AND state = %d AND lease_expires_at > now()`,
 	// a different token means token mismatch, otherwise not found.
 	s.qClassify = fmt.Sprintf(`
 SELECT token FROM %s WHERE key = $1 AND state = %d AND lease_expires_at > now()`, t, stateReserved)
+
+	// Classifies a failed CompleteTx CAS inside the caller's tx: reads
+	// any live row (own uncommitted writes included) to distinguish a
+	// double call (completed under our token) from a lost lease.
+	s.qClassifyTx = fmt.Sprintf(`
+SELECT state, token FROM %s WHERE key = $1 AND %s`, t, live)
 
 	s.qRelease = fmt.Sprintf(`
 DELETE FROM %s WHERE key = $1 AND token = $2 AND state = %d AND lease_expires_at > now()`,
@@ -259,6 +280,54 @@ func (s *Store) Get(ctx context.Context, key string) (*idemlease.Record, error) 
 		return nil, fmt.Errorf("pgstore: get: %w", err)
 	}
 	return rec, nil
+}
+
+// CompleteTx performs the reserved→completed transition inside the
+// caller's transaction, so the business writes and the idempotency
+// record commit or roll back as one unit (§9.3). Take key and token
+// from httpidem.ReservationFromContext, and after a successful commit
+// call httpidem.MarkFinished and respond via httpidem.WriteStored with
+// the same StoredResponse whose MarshalBinary produced payload.
+//
+// Return values follow the idemlease.Finish vocabulary:
+//
+//   - (false, nil): the transition is part of tx; committing tx makes
+//     the record and the business writes durable together.
+//   - (true, nil): the lease was lost — expired, or the key is owned by
+//     another execution. The caller MUST roll back tx: committing would
+//     risk duplicating the business effects the new owner is producing.
+//   - (false, ErrAlreadyCompleted): CompleteTx already succeeded under
+//     this token in this transaction (a double call); the transaction
+//     itself is healthy.
+//   - (false, err): infrastructure failure; roll back.
+//
+// The CAS UPDATE takes the record's row lock, so racing executions of
+// the same key serialize here: the loser sees zero rows after the
+// winner commits and must roll back — this is what upgrades the
+// guarantee to "at most one business commit per completed record".
+func (s *Store) CompleteTx(ctx context.Context, tx DBTX, key, token string, payload []byte, recordTTL time.Duration) (leaseLost bool, err error) {
+	res, err := tx.ExecContext(ctx, s.qComplete, []byte(key), token, payload, recordTTLMillis(recordTTL))
+	if err != nil {
+		return false, fmt.Errorf("pgstore: complete tx: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return false, nil
+	}
+	var (
+		state   int
+		current string
+	)
+	err = tx.QueryRowContext(ctx, s.qClassifyTx, []byte(key)).Scan(&state, &current)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return true, nil // absent or expired: the lease is gone
+	case err != nil:
+		return false, fmt.Errorf("pgstore: complete tx classify: %w", err)
+	case state == stateCompleted && current == token:
+		return false, ErrAlreadyCompleted
+	default:
+		return true, nil // another execution owns the record
+	}
 }
 
 // Sweep physically deletes up to limit logically-expired rows and

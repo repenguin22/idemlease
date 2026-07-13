@@ -121,6 +121,23 @@ func TestRecordTTLExpiryAllowsReexecution(t *testing.T) {
 	}
 }
 
+// TestOptionsEffective pins that Effective resolves zero and negative
+// TTLs to the package defaults and keeps explicit values.
+func TestOptionsEffective(t *testing.T) {
+	got := idemlease.Options{}.Effective()
+	if got.LeaseTTL != idemlease.DefaultLeaseTTL || got.RecordTTL != idemlease.DefaultRecordTTL {
+		t.Fatalf("Effective() = %+v, want package defaults", got)
+	}
+	got = idemlease.Options{LeaseTTL: -1, RecordTTL: -1}.Effective()
+	if got.LeaseTTL != idemlease.DefaultLeaseTTL || got.RecordTTL != idemlease.DefaultRecordTTL {
+		t.Fatalf("Effective() on negatives = %+v, want package defaults", got)
+	}
+	explicit := idemlease.Options{LeaseTTL: time.Second, RecordTTL: time.Minute}
+	if got := explicit.Effective(); got != explicit {
+		t.Fatalf("Effective() = %+v, want explicit values kept", got)
+	}
+}
+
 // TestOptionsDefaults verifies that zero Options fall back to
 // DefaultLeaseTTL / DefaultRecordTTL.
 func TestOptionsDefaults(t *testing.T) {

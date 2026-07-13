@@ -274,6 +274,8 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := NewRecorder(cfg.maxResponseBody, cfg.storeHeaders)
 	cw := &captureWriter{ResponseWriter: w, rec: rec}
 	ctx, handlerErr := ErrorChannel(r.Context())
+	ctx = ContextWithReservation(ctx, Reservation{Key: storeKey, Token: out.Token, Options: o.Effective()})
+	ctx, finished := FinishChannel(ctx)
 	// Finish must reach the store even when the client disconnects
 	// mid-request: the work happened, so the record must reflect it.
 	finishCtx := context.WithoutCancel(ctx)
@@ -282,15 +284,23 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if p := recover(); p != nil {
 			// §5.1: panic → Discard and re-panic; recovery into an HTTP
 			// response is the responsibility of outer middleware.
-			if _, ferr := idemlease.Finish(finishCtx, m.store, storeKey, out.Token, idemlease.Discard, nil, o); ferr != nil {
-				cfg.logger.Warn("httpidem: releasing reservation after handler panic failed",
-					append(m.keyAttrs(scope, key), slog.Any("error", ferr))...)
+			if !finished() {
+				if _, ferr := idemlease.Finish(finishCtx, m.store, storeKey, out.Token, idemlease.Discard, nil, o); ferr != nil {
+					cfg.logger.Warn("httpidem: releasing reservation after handler panic failed",
+						append(m.keyAttrs(scope, key), slog.Any("error", ferr))...)
+				}
 			}
 			panic(p)
 		}
 	}()
 	m.next.ServeHTTP(cw, r.WithContext(ctx))
 	cw.finalize()
+
+	if finished() {
+		// The handler finalized the record itself (transactional join,
+		// §9.3); there is nothing to persist or discard here.
+		return
+	}
 
 	decision := cfg.policy.Decide(rec.Status(), handlerErr())
 	if decision == idemlease.Persist {
@@ -354,15 +364,10 @@ func (m *middleware) writeReplay(w http.ResponseWriter, r *http.Request, scope, 
 		m.cfg.errorWriter.WriteError(w, r, http.StatusInternalServerError, err)
 		return
 	}
-	header := w.Header()
-	for name, values := range sr.Header {
-		header[name] = append([]string(nil), values...)
-	}
 	if m.cfg.replayedHeader {
-		header.Set(HeaderIdempotencyReplayed, "true")
+		w.Header().Set(HeaderIdempotencyReplayed, "true")
 	}
-	w.WriteHeader(sr.StatusCode)
-	_, _ = w.Write(sr.Body)
+	_ = WriteStored(w, sr) // the same write path handlers use (§9.3)
 }
 
 // keyAttrs builds the log attributes carried by every middleware log
